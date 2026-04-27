@@ -1035,29 +1035,31 @@ struct ContentView: View {
     // MARK: – Status bar
 
     private var statusBar: some View {
-        HStack(spacing: 8) {
-            Group {
-                if vm.isRunning {
-                    ProgressView().controlSize(.mini)
-                        .accessibilityLabel("Probíhá zpracování")
-                } else {
-                    Circle()
-                        .fill(.green)
-                        .frame(width: 8, height: 8)
-                        .accessibilityLabel("Připraveno")
+        ZStack {
+            Color.clear
+            HStack(alignment: .center, spacing: 8) {
+                Group {
+                    if vm.isRunning {
+                        ProgressView().controlSize(.mini)
+                            .accessibilityLabel("Probíhá zpracování")
+                    } else {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 8, height: 8)
+                            .accessibilityLabel("Připraveno")
+                    }
                 }
+                .frame(width: 12, height: 12)
+                Text(vm.statusText)
+                    .font(.body)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityLabel("Stav: \(vm.statusText)")
+                Spacer()
             }
-            .frame(width: 12, height: 12)
-            Text(vm.statusText)
-                .font(.caption)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .accessibilityLabel("Stav: \(vm.statusText)")
-            Spacer()
+            .padding(.horizontal, 12)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .frame(height: 22)
+        .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34)
         .background(.thinMaterial)
         .overlay(Divider(), alignment: .top)
     }
