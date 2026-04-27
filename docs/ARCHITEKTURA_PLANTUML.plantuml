@@ -1,0 +1,68 @@
+@startuml
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+left to right direction
+
+actor "Uživatel" as User
+
+package "UI" {
+  [ContentView\n(SwiftUI)] as CV
+  [SettingsView\n(Settings scene\ncustom tab selector)] as SET
+}
+
+package "Presentation" {
+  [SHAppViewModel\n(MVVM orchestrace)] as VM
+}
+
+package "Pipeline" {
+  [SHPreprocessingPipeline\n(FÁZE 1)] as PRE
+  [SHExtractionPipeline\n(FÁZE 2)] as EXT
+  [SHQueueManager\n(Concurrency + backpressure)] as Q
+}
+
+package "Services" {
+  [SHFileScanService\n(scan + SHA256)] as SCAN
+  [SHPDFParser\n(PDFKit text layer)] as PDF
+  [SHVisionOCRProvider\n(Vision OCR fallback)] as OCR
+  [SHTextCleaningService\n(clean + dedup)] as CLEAN
+  [SHOpenAICompatibleClient\n(OpenAI-compatible API)] as LM
+  [SHPromptLibraryService\n(load .md prompt files)] as PROMPTS
+  [SHBenchmarkService\n(metrics)] as BENCH
+}
+
+package "Storage" {
+  [SHCacheManager\n(JSON cache)] as CACHE
+  [SHProcessingLogger\n(processing.log)] as LOG
+  [SHExportService\n(JSON/TXT/CSV)] as EXP
+  [SHConfigStore +\nSHServerRegistryStore\n(UserDefaults)] as CFG
+}
+
+User --> CV
+CV --> VM
+
+VM --> CFG
+VM --> PROMPTS
+VM --> PRE
+VM --> EXT
+VM --> EXP
+VM --> LOG
+VM --> BENCH
+
+PRE --> Q
+PRE --> SCAN
+PRE --> PDF
+PRE --> OCR
+PRE --> CLEAN
+PRE --> CACHE
+PRE --> LOG
+PRE --> BENCH
+
+EXT --> Q
+EXT --> LM
+EXT --> LOG
+EXT --> BENCH
+
+EXT ..> CACHE : vstup cached docs
+EXP ..> EXT : výsledky
+
+@enduml
