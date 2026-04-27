@@ -5,7 +5,7 @@
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)](https://developer.apple.com/xcode/swiftui/)
 [![Architecture](https://img.shields.io/badge/architecture-MVVM-success)](#)
 
-Lokální desktop aplikace pro macOS pro rychlé dávkové vytěžování dat z PDF dokumentů přes lokální LLM (LM Studio nebo MLX). Původně vznikla nad zdravotnickou dokumentací, ale díky tomu, že **schéma výstupu definuje uživatelský prompt**, ji lze použít na libovolný typ dokumentů — smlouvy, faktury, posudky, zápisy, technické zprávy, korespondenci atd.
+Lokální desktop aplikace pro macOS pro rychlé dávkové vytěžování dat z PDF dokumentů přes lokální LLM (LM Studio nebo MLX). Původně vznikla nad zdravotnickou dokumentací — **ambulantní, propouštěcí a překladové zprávy, laboratorní výsledky** — ale díky tomu, že **schéma výstupu definuje uživatelský prompt**, ji lze použít na libovolný typ dokumentů: smlouvy, faktury, posudky, zápisy, technické zprávy, korespondenci atd.
 
 > Data zůstávají lokálně. Žádný cloud, žádný telemetry.
 
