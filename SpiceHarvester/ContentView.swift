@@ -384,7 +384,7 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .help("Přidat MLX server na http://localhost:8000/v1")
+            .help(Text(verbatim: "Přidat MLX server na http://localhost:8000/v1"))
             .accessibilityLabel("Přidat MLX server")
 
             Button { vm.removeSelectedServer() } label: {
