@@ -306,6 +306,25 @@ struct ContentView: View {
     /// "Setup happens here, run happens here" reads as one column instead
     /// of forcing the eye to jump between top toolbar and content.
     private var runRow: some View {
+        // ViewThatFits picks the first variant whose intrinsic size fits
+        // the available width. Wide window → icon+title labels; narrow
+        // window → icon-only fallback (with tooltips intact for
+        // discoverability). Without this, four labelled buttons + the
+        // status pill could overflow on a 940 pt min-width window when
+        // localized to longer strings.
+        ViewThatFits(in: .horizontal) {
+            runRowContent(labelStyle: .titleAndIcon)
+            runRowContent(labelStyle: .iconOnly)
+        }
+    }
+
+    /// Run row body parameterized by label style. Both variants are
+    /// rendered into ViewThatFits which picks the wider one when it fits.
+    /// Generic `S: LabelStyle` instead of any-erased type so the SwiftUI
+    /// inference picks concrete `TitleAndIconLabelStyle` vs
+    /// `IconOnlyLabelStyle` at compile time.
+    @ViewBuilder
+    private func runRowContent<S: LabelStyle>(labelStyle: S) -> some View {
         HStack(spacing: 10) {
             statusIndicator
             Spacer()
@@ -315,7 +334,7 @@ struct ContentView: View {
                 } label: {
                     Label("Přerušit", systemImage: "stop.circle.fill")
                 }
-                .labelStyle(.titleAndIcon)
+                .labelStyle(labelStyle)
                 .buttonStyle(.bordered)
                 .tint(.red)
                 .focused($focus, equals: .cancel)
@@ -327,7 +346,7 @@ struct ContentView: View {
                 } label: {
                     Label("Spustit", systemImage: "play.fill")
                 }
-                .labelStyle(.titleAndIcon)
+                .labelStyle(labelStyle)
                 .buttonStyle(.borderedProminent)
                 .tint(.blue)
                 .disabled(!vm.canRunAll)
@@ -342,7 +361,7 @@ struct ContentView: View {
             } label: {
                 Label("Výstup", systemImage: "folder")
             }
-            .labelStyle(.titleAndIcon)
+            .labelStyle(labelStyle)
             .buttonStyle(.bordered)
             .disabled(!vm.canOpenOutput)
             .focused($focus, equals: .output)
@@ -362,7 +381,7 @@ struct ContentView: View {
             } label: {
                 Label("Nápověda", systemImage: "questionmark.circle")
             }
-            .labelStyle(.titleAndIcon)
+            .labelStyle(labelStyle)
             .buttonStyle(.bordered)
             .focused($focus, equals: .help)
             .modifier(VisibleFocusRing(isFocused: focus == .help))
@@ -1420,6 +1439,20 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.blue)
+            } else if conflict.isDismissible {
+                // Info-only conflict (consolidateIgnoresConcurrency).
+                // No corrective action — user has read it, give them
+                // a way to acknowledge so the banner stops nagging
+                // for the rest of the session.
+                Button {
+                    vm.dismissConflict(conflict)
+                } label: {
+                    Label("Skrýt", systemImage: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .tint(.secondary)
+                .help("Skrýt do konce session — zase se objeví po restartu aplikace.")
             }
         }
         .padding(8)

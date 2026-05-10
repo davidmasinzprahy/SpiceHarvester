@@ -113,6 +113,22 @@ struct SHProjectSnapshot: Codable, Sendable {
     }
 }
 
+/// Errors specific to the Save / Load Project feature. Surfaced to the
+/// view layer through `SHOpenProjectOutcome.failed(error:)` and
+/// rendered as user-readable text in the "Otevření projektu selhalo"
+/// alert. JSON decoding errors from `JSONDecoder` are intentionally
+/// passed through as-is — they're already descriptive enough.
+enum SHProjectError: LocalizedError {
+    case notAProject(url: URL)
+
+    var errorDescription: String? {
+        switch self {
+        case .notAProject(let url):
+            return "Soubor \(url.lastPathComponent) není projekt Spice Harvester. Otevři soubor exportovaný přes Uložit projekt jako…"
+        }
+    }
+}
+
 /// Result of `SHAppViewModel.openProject`. The view layer matches on
 /// these to show appropriate UI:
 ///   - `success`: silent; statusBar gets the message
@@ -309,6 +325,13 @@ final class SHAppViewModel {
 
     var canOpenOutput: Bool { hasOutputFolder }
 
+    /// True when the project has at least one meaningful field set, so
+    /// "Uložit projekt jako…" produces a non-empty snapshot. Empty
+    /// project save = JSON with only empty strings, useless and confusing.
+    var canSaveProject: Bool {
+        hasInputFolder || hasOutputFolder || hasPrompt
+    }
+
     var toolbarReadyText: String {
         if isRunning { return "Zpracovávám…" }
         if !hasAllInputFolders { return "Zadej cesty ke složkám" }
@@ -382,6 +405,12 @@ final class SHAppViewModel {
     /// last change.
     var displayedConflicts: [SHParameterConflict] = []
     private var conflictDebounceTask: Task<Void, Never>?
+    /// Set of conflict identifiers the user explicitly dismissed in this
+    /// session. Filtered out of `displayedConflicts` before assignment.
+    /// Per-session only (no UserDefaults) — when the underlying state
+    /// changes the dismissal naturally resets via `dismissedConflictIDs`
+    /// being keyed off conflict identity, not config snapshot.
+    private var dismissedConflictIDs: Set<String> = []
 
     /// Schedules an update of `displayedConflicts` to the current value of
     /// `parameterConflicts` after a debounce window. Called from view-model
@@ -394,8 +423,19 @@ final class SHAppViewModel {
         conflictDebounceTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: snapshotDelay)
             guard !Task.isCancelled, let self else { return }
-            self.displayedConflicts = self.parameterConflicts
+            self.displayedConflicts = self.parameterConflicts.filter { conflict in
+                !self.dismissedConflictIDs.contains(conflict.dismissID)
+            }
         }
+    }
+
+    /// Dismiss an informational conflict banner for this session. Used
+    /// for the consolidate-ignores-concurrency notice which has no
+    /// corrective action — the user has read it, doesn't need to be
+    /// reminded every keystroke. Re-appears on next launch.
+    func dismissConflict(_ conflict: SHParameterConflict) {
+        dismissedConflictIDs.insert(conflict.dismissID)
+        displayedConflicts.removeAll { $0.dismissID == conflict.dismissID }
     }
 
     /// All currently-active conflicts between `config` and `config.currentPrompt`.
@@ -1288,9 +1328,19 @@ final class SHAppViewModel {
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
         panel.title = "Otevřít projekt…"
+        panel.message = "Vyber .spiceharvester.json soubor exportovaný přes Uložit projekt jako…"
         guard panel.runModal() == .OK, let url = panel.url else { return .cancelled }
         do {
             let data = try Data(contentsOf: url)
+            // Wrap the decode in a project-shaped sniff so a friendly
+            // error replaces the noisy `keyNotFound(...)` cascade when
+            // the user picks a random JSON. Validates one canonical
+            // marker (`schemaVersion`) before going for the full decode.
+            guard let probe = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  probe["schemaVersion"] != nil else {
+                statusText = "Tento JSON není projekt Spice Harvester"
+                return .failed(error: SHProjectError.notAProject(url: url))
+            }
             let snapshot = try JSONDecoder().decode(SHProjectSnapshot.self, from: data)
 
             // Reset runtime state so the user doesn't see the previous
@@ -1376,7 +1426,15 @@ final class SHAppViewModel {
             list.removeLast(list.count - Self.recentFoldersLimit)
         }
         recentFolders[kind] = list
-        UserDefaults.standard.set(list, forKey: Self.recentFolderKey(for: kind))
+        // UserDefaults.set serializes through main thread by default;
+        // for a single ~5-element string array per folder slot it's
+        // submillisecond, but we move it off-main as a defensive
+        // measure — folder picks happen in rapid succession when the
+        // user is iterating projects, no reason to make Vybrat wait.
+        let key = Self.recentFolderKey(for: kind)
+        Task.detached(priority: .utility) {
+            UserDefaults.standard.set(list, forKey: key)
+        }
     }
 
     /// Recents for a given slot, freshest first. Empty when the user has

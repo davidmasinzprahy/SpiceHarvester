@@ -64,6 +64,30 @@ struct SpiceHarvesterApp: App {
                 .disabled(!vm.canOpenOutput)
             }
 
+            // Režim extrakce zkratky. Cmd+1/2/3 přepínají FAST / SEARCH /
+            // CONSOLIDATE bez nutnosti scrollovat na segmented picker. Pro
+            // power-usery, kteří iterují prompt s různými režimy, je
+            // klikání myší výrazný friction point.
+            CommandGroup(after: .toolbar) {
+                Button("Režim FAST") {
+                    vm.config.extractionMode = .fast
+                }
+                .keyboardShortcut("1", modifiers: .command)
+                .disabled(vm.isRunning)
+
+                Button("Režim SEARCH") {
+                    vm.config.extractionMode = .search
+                }
+                .keyboardShortcut("2", modifiers: .command)
+                .disabled(vm.isRunning)
+
+                Button("Režim CONSOLIDATE") {
+                    vm.config.extractionMode = .consolidate
+                }
+                .keyboardShortcut("3", modifiers: .command)
+                .disabled(vm.isRunning)
+            }
+
             CommandGroup(replacing: .help) {
                 Button("Nápověda Spice Harvester") {
                     showHelp = true
@@ -82,7 +106,11 @@ struct SpiceHarvesterApp: App {
                     _ = vm.saveProjectAs()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
-                .disabled(vm.isRunning)
+                // Saving an empty project (no folders, no prompt) yields
+                // a JSON file with just empty strings — useless to the
+                // user. Require at least input + output set, or a prompt,
+                // before offering the save.
+                .disabled(vm.isRunning || !vm.canSaveProject)
 
                 Button("Otevřít projekt…") {
                     let outcome = vm.openProject()

@@ -154,4 +154,23 @@ enum SHParameterConflict: Equatable, Sendable {
             return nil
         }
     }
+
+    /// Stable per-case identifier used by the dismissal store. Stored as
+    /// a string so we don't have to make `SHParameterConflict` Hashable
+    /// (associated values would force synthesized hashing of the whole
+    /// payload, which we don't want — two `modeMismatch` with different
+    /// reason strings should share the same dismissal slot).
+    var dismissID: String {
+        switch self {
+        case .modeMismatch: return "modeMismatch"
+        case .searchModeWithoutEmbeddingModel: return "searchModeWithoutEmbeddingModel"
+        case .consolidateIgnoresConcurrency: return "consolidateIgnoresConcurrency"
+        }
+    }
+
+    /// True when the banner offers no corrective action — only informs.
+    /// Drives the "Skrýt" button visibility in the conflict banner.
+    var isDismissible: Bool {
+        actionLabel == nil
+    }
 }
