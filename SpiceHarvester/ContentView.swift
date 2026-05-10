@@ -49,12 +49,20 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     notificationStack
                     VSplitView {
+                        // Vertical insets on each pane create a visible gap
+                        // around the resize handle. Without them VSplitView
+                        // draws cards touching the divider line, which reads
+                        // as one merged block instead of three resizable
+                        // sections. ~5 pt above/below = ~10 pt total gap.
                         promptsCard
-                            .frame(minHeight: 160, idealHeight: 280, maxHeight: .infinity)
+                            .padding(.bottom, 5)
+                            .frame(minHeight: 170, idealHeight: 290, maxHeight: .infinity)
                         progressStatusCard
-                            .frame(minHeight: 70, idealHeight: 110)
+                            .padding(.vertical, 5)
+                            .frame(minHeight: 80, idealHeight: 120)
                         logCard
-                            .frame(minHeight: 140, idealHeight: 240, maxHeight: .infinity)
+                            .padding(.top, 5)
+                            .frame(minHeight: 150, idealHeight: 250, maxHeight: .infinity)
                     }
                 }
                 .padding(14)
