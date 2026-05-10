@@ -45,6 +45,16 @@ enum SHPromptThinkingMode: Equatable, Sendable {
     case thinking
 }
 
+/// One row of the onboarding checklist shown above the configuration cards while
+/// any prerequisite is missing. Each step is tied to a `hasX` predicate on the
+/// view model so the row "checks itself" the moment the user fills the value in.
+struct SHSetupStep: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let hint: String
+    let isDone: Bool
+}
+
 @MainActor
 @Observable
 final class SHAppViewModel {
@@ -69,6 +79,22 @@ final class SHAppViewModel {
     /// style the "Ověřit server" button green only after a confirmed round-trip. Reset on
     /// server switch, edit, add, or remove.
     var verifiedServerID: UUID?
+    /// Number of PDFs found in the configured input folder (recursive scan). Drives
+    /// the "N PDF" chip under the input row so the user sees there is data to
+    /// process before pressing Run. `nil` until first scan; refreshed on folder
+    /// change. The chip distinguishes "0 found" (chip with 0) from "not scanned
+    /// yet" (chip hidden) — they imply different next actions.
+    var inputFolderPdfCount: Int?
+    /// Total bytes of the PDFs counted by `inputFolderPdfCount`. Shown next to the
+    /// chip as "N PDF · X MB" so the user gets a quick sense of batch size before
+    /// kicking off a multi-minute run.
+    var inputFolderPdfBytes: Int64?
+    /// Live ticker of paths currently in flight inside the active pipeline phase
+    /// (FAST/SEARCH extraction or preprocessing). Drives the granular sub-line in
+    /// the Progress card. Mirrored onto `progressState.currentlyProcessing` so all
+    /// phase-related state lives in one struct, but exposed here too for the
+    /// view's `.onChange` subscriptions.
+    private var inflightItems: Set<String> = []
 
     /// Is the currently selected server's last verification still valid?
     var isSelectedServerVerified: Bool {
@@ -266,6 +292,129 @@ final class SHAppViewModel {
         }
 
         return result
+    }
+
+    // MARK: – Onboarding checklist
+
+    /// Steps shown in the onboarding banner. Banner is hidden in the view layer
+    /// once `isSetupComplete` flips true, but this list always exposes all 4 steps
+    /// so the row count never changes (avoids layout jumps as steps are checked).
+    var setupSteps: [SHSetupStep] {
+        [
+            SHSetupStep(
+                id: "input",
+                title: "Vyber vstupní složku",
+                hint: "Sem dej PDF dokumenty, které chceš zpracovat.",
+                isDone: hasInputFolder
+            ),
+            SHSetupStep(
+                id: "output",
+                title: "Vyber výstupní složku",
+                hint: "Sem aplikace zapíše JSON / CSV / TXT a log.",
+                isDone: hasOutputFolder
+            ),
+            SHSetupStep(
+                id: "server",
+                title: "Server a inference model",
+                hint: "Spusť LM Studio nebo MLX, klikni Ověřit a vyber model.",
+                isDone: hasSelectedServer && hasInferenceModel
+            ),
+            SHSetupStep(
+                id: "prompt",
+                title: "Zadej nebo načti prompt",
+                hint: "Prompt definuje schéma výstupu a režim extrakce.",
+                isDone: hasPrompt
+            ),
+        ]
+    }
+
+    /// True when every step in `setupSteps` is done. View hides the onboarding
+    /// banner the moment this flips. Computed (not stored) so it never goes out
+    /// of sync with the underlying predicates.
+    var isSetupComplete: Bool {
+        setupSteps.allSatisfy(\.isDone)
+    }
+
+    // MARK: – Input folder stats
+
+    /// Re-scans the input folder for PDFs and updates `inputFolderPdfCount` /
+    /// `inputFolderPdfBytes`. Cheap (FileManager enumerator, no parsing); safe to
+    /// call from the main actor. Clears the chip when the folder is unset.
+    func refreshInputFolderStats() {
+        let trimmed = config.inputFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            inputFolderPdfCount = nil
+            inputFolderPdfBytes = nil
+            return
+        }
+
+        // Use the same scoped-access wrapper as the rest of the app so a folder
+        // selected in a previous session (security-scoped bookmark) keeps working.
+        let scanner = SHFileScanService()
+        let result: (count: Int, bytes: Int64)? = withScopedAccess(to: trimmed) { url in
+            let urls = scanner.recursivePDFs(in: url)
+            var bytes: Int64 = 0
+            for u in urls {
+                if let size = try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    bytes += Int64(size)
+                }
+            }
+            return (urls.count, bytes)
+        }
+
+        if let result {
+            inputFolderPdfCount = result.count
+            inputFolderPdfBytes = result.bytes
+        } else {
+            inputFolderPdfCount = nil
+            inputFolderPdfBytes = nil
+        }
+    }
+
+    /// Human-readable label for the chip under the input folder row. Returns nil
+    /// when no scan has run yet — the view hides the chip in that case.
+    var inputFolderChipLabel: String? {
+        guard let count = inputFolderPdfCount else { return nil }
+        if count == 0 {
+            return "Žádné PDF"
+        }
+        if let bytes = inputFolderPdfBytes, bytes > 0 {
+            let formatter = ByteCountFormatter()
+            formatter.allowedUnits = [.useKB, .useMB, .useGB]
+            formatter.countStyle = .file
+            return "\(count) PDF · \(formatter.string(fromByteCount: bytes))"
+        }
+        return "\(count) PDF"
+    }
+
+    // MARK: – Item lifecycle (granular progress)
+
+    /// Called from the pipeline when a single document/batch starts running.
+    /// Adds the item to `inflightItems` and mirrors the set onto
+    /// `progressState.currentlyProcessing` (sorted, capped at 6) so the progress
+    /// card has a deterministic, bounded list to render.
+    func itemStarted(_ name: String) {
+        inflightItems.insert(name)
+        progressState.currentlyProcessing = Array(inflightItems.sorted().prefix(6))
+        progressState.lastProgressAt = Date()
+    }
+
+    /// Called from the pipeline when a single document/batch finishes (success,
+    /// failure, or cancellation — all three count as "no longer in flight"). The
+    /// last finished name is kept so the user always sees forward motion, even
+    /// in the brief gaps between throttle pauses.
+    func itemFinished(_ name: String) {
+        inflightItems.remove(name)
+        progressState.currentlyProcessing = Array(inflightItems.sorted().prefix(6))
+        progressState.lastFinishedItem = name
+        progressState.lastProgressAt = Date()
+    }
+
+    /// Resets the granular-progress book-keeping at the start of each run.
+    func resetItemTracking() {
+        inflightItems.removeAll()
+        progressState.currentlyProcessing = []
+        progressState.lastFinishedItem = nil
     }
 
     /// One-click apply for a conflict. Mirrors the button in the banner.
@@ -525,7 +674,12 @@ final class SHAppViewModel {
         }
     }
 
-    func chooseInputFolder() { pickFolder(into: \.inputFolder) { self.invalidateCachedDocumentsIfInputChanged() } }
+    func chooseInputFolder() {
+        pickFolder(into: \.inputFolder) {
+            self.invalidateCachedDocumentsIfInputChanged()
+            self.refreshInputFolderStats()
+        }
+    }
     func chooseOutputFolder() { pickFolder(into: \.outputFolder) }
     func chooseCacheFolder() { pickFolder(into: \.cacheFolder) }
     func choosePromptFolder() { pickFolder(into: \.promptFolder) }
@@ -553,6 +707,10 @@ final class SHAppViewModel {
             progressState.counters = SHPipelineCounters()
             statusText = "Vstupní složka se změnila – cache v paměti byla zahozena"
         }
+        // Drop any chip data tied to the old folder; the view triggers a fresh
+        // scan via `.onChange(of: inputFolder)`.
+        inputFolderPdfCount = nil
+        inputFolderPdfBytes = nil
     }
 
     /// Refreshes the list of `.md` files available in the configured prompt folder.
@@ -890,6 +1048,7 @@ final class SHAppViewModel {
         progressState.startedAt = Date()
         progressState.phase = .preprocessing
         statusText = "Spouštím předzpracování"
+        resetItemTracking()
 
         do {
             let logger = try ensureLogger(outputURL: outputURL)
@@ -910,12 +1069,24 @@ final class SHAppViewModel {
                 preprocessingSignature: preprocessingSignature()
             )
 
-            let output = await pipeline.run(inputFolder: inputURL) { [weak self] counters in
-                await MainActor.run { [weak self] in
-                    self?.applyCounters(counters)
-                    self?.recalculateEta()
+            let output = await pipeline.run(
+                inputFolder: inputURL,
+                onCounters: { [weak self] counters in
+                    await MainActor.run { [weak self] in
+                        self?.applyCounters(counters)
+                        self?.recalculateEta()
+                    }
+                },
+                onItemEvent: { [weak self] event in
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        switch event {
+                        case .started(let name): self.itemStarted(name)
+                        case .finished(let name): self.itemFinished(name)
+                        }
+                    }
                 }
-            }
+            )
 
             cachedDocuments = output.cachedDocuments
             cachedDocumentsInputPath = config.inputFolder.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1009,6 +1180,7 @@ final class SHAppViewModel {
         progressState.extractionProgressTotal = cachedDocuments.count
         progressState.extractionProgressLabel = "dokumentů"
         statusText = "Spouštím extrakci"
+        resetItemTracking()
 
         // For CONSOLIDATE batches, re-fetch the model's loaded context length
         // from LM Studio so the pre-flight check works against the current model
@@ -1068,6 +1240,15 @@ final class SHAppViewModel {
                             documentTotal: documentTotal
                         )
                         self.recalculateEta()
+                    }
+                },
+                onItemEvent: { [weak self] event in
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        switch event {
+                        case .started(let name): self.itemStarted(name)
+                        case .finished(let name): self.itemFinished(name)
+                        }
                     }
                 }
             )

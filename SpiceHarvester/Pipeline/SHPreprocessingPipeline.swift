@@ -35,7 +35,8 @@ final class SHPreprocessingPipeline {
 
     func run(
         inputFolder: URL,
-        onCounters: @escaping @Sendable (SHPipelineCounters) async -> Void
+        onCounters: @escaping @Sendable (SHPipelineCounters) async -> Void,
+        onItemEvent: @escaping @Sendable (SHExtractionItemEvent) async -> Void = { _ in }
     ) async -> Output {
         let scanStart = Date()
         let files = scanner.recursivePDFs(in: inputFolder)
@@ -48,12 +49,24 @@ final class SHPreprocessingPipeline {
         await withTaskGroup(of: SHCachedDocument?.self) { group in
             for file in files {
                 group.addTask {
+                    let name = file.lastPathComponent
                     do {
-                        return try await self.queue.run {
-                            try await self.processOne(fileURL: file)
+                        return try await self.queue.run { () -> SHCachedDocument? in
+                            // Emit "started" only after the worker semaphore lets
+                            // the file through, otherwise the UI would show all
+                            // queued PDFs as "currently processing" at once.
+                            await onItemEvent(.started(name: name))
+                            do {
+                                let result = try await self.processOne(fileURL: file)
+                                await onItemEvent(.finished(name: name))
+                                return result
+                            } catch {
+                                await onItemEvent(.finished(name: name))
+                                throw error
+                            }
                         }
                     } catch {
-                        await self.logger.log(level: "ERROR", file: file.lastPathComponent, phase: "PREPROCESS", message: error.localizedDescription)
+                        await self.logger.log(level: "ERROR", file: name, phase: "PREPROCESS", message: error.localizedDescription)
                         return nil
                     }
                 }

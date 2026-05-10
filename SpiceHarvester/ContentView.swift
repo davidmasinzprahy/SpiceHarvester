@@ -19,6 +19,10 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var leftCardsAnchorY: CGFloat = 0
     @State private var progressCardY: CGFloat = 0
+    /// Optional case-insensitive substring filter applied to the log card. Empty
+    /// = show all lines. Lives on the view (not the view model) because filtering
+    /// is purely a presentation concern — the on-disk log is unchanged.
+    @State private var logFilter: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,14 +38,13 @@ struct ContentView: View {
                 .padding(14)
                 .frame(minWidth: 540, idealWidth: 620)
 
-                // Right: runtime (completion / progress / log). Log expands
-                // vertically; nothing nested under another ScrollView so macOS
-                // momentum scrolling stays predictable.
+                // Right: runtime. The runtime header now also hosts notification
+                // banners (conflict + completion) so everything that needs the
+                // user's attention lives in one column instead of split between
+                // the prompt area and the runtime column.
                 VStack(alignment: .leading, spacing: 10) {
                     runtimeHeaderSpacer
-                    if let completion = vm.lastCompletion {
-                        completionBanner(completion)
-                    }
+                    notificationStack
                     progressStatusCard
                     logCard
                 }
@@ -54,6 +57,10 @@ struct ContentView: View {
         .coordinateSpace(name: "contentRoot")
         .onPreferenceChange(LeftCardsAnchorPreferenceKey.self) { leftCardsAnchorY = $0 }
         .onPreferenceChange(ProgressCardYPreferenceKey.self) { progressCardY = $0 }
+        .onAppear { vm.refreshInputFolderStats() }
+        .onChange(of: vm.config.inputFolder) { _, _ in
+            vm.refreshInputFolderStats()
+        }
         .sheet(isPresented: $showHelp) {
             HelpSheet(dismiss: { showHelp = false })
         }
@@ -67,6 +74,26 @@ struct ContentView: View {
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
+        }
+    }
+
+    /// Right-column notification stack: completion banner first (post-run), then
+    /// any active config conflicts. Both used to live in different places — the
+    /// completion in the right column, conflicts under the prompt editor — which
+    /// split the user's attention. Grouping them under the runtime header keeps
+    /// "things I need to act on" in one place and lets the prompt editor own its
+    /// full vertical room.
+    @ViewBuilder
+    private var notificationStack: some View {
+        if vm.lastCompletion != nil || !vm.parameterConflicts.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                if let completion = vm.lastCompletion {
+                    completionBanner(completion)
+                }
+                ForEach(Array(vm.parameterConflicts.enumerated()), id: \.offset) { _, conflict in
+                    conflictBanner(conflict)
+                }
+            }
         }
     }
 
@@ -91,12 +118,58 @@ struct ContentView: View {
 
     private var leftConfigurationCards: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if !vm.isSetupComplete {
+                onboardingCard
+            }
             foldersCard
             serverCard
             promptsCard
                 .frame(maxHeight: .infinity)
         }
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Onboarding banner shown above the configuration cards while any of the
+    /// four required steps is missing. Each row is a static line — checked or
+    /// unchecked — so the count never changes and the banner doesn't jump
+    /// around as steps are filled in. Auto-hides the moment all four steps
+    /// pass; never reappears after that within the same session.
+    private var onboardingCard: some View {
+        let steps = vm.setupSteps
+        let doneCount = steps.filter(\.isDone).count
+        return GlassCard(title: "Začni tady", systemImage: "wand.and.stars") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Vyplň následující čtyři kroky a pak stiskni **Spustit** v horní liště.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(steps) { step in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: step.isDone ? "checkmark.circle.fill" : "circle")
+                            .font(.callout)
+                            .foregroundStyle(step.isDone ? .green : .secondary)
+                            .symbolRenderingMode(.hierarchical)
+                            .padding(.top, 1)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(step.title)
+                                .font(.footnote.weight(.semibold))
+                                .strikethrough(step.isDone, color: .secondary)
+                                .foregroundStyle(step.isDone ? .secondary : .primary)
+                            Text(step.hint)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 4)
+                    }
+                }
+
+                ProgressView(value: Double(doneCount), total: Double(steps.count))
+                    .tint(.green)
+                    .padding(.top, 2)
+            }
+        }
     }
 
     // MARK: – Runtime actions
@@ -248,9 +321,14 @@ struct ContentView: View {
     private var foldersCard: some View {
         GlassCard(title: "Složky", systemImage: "folder.fill") {
             VStack(spacing: 6) {
-                folderRow(icon: "tray.and.arrow.down.fill", label: "Vstup",
-                          path: vm.config.inputFolder, action: vm.chooseInputFolder,
-                          onDrop: { vm.config.inputFolder = $0; vm.persistAllDebounced() })
+                VStack(alignment: .leading, spacing: 2) {
+                    folderRow(icon: "tray.and.arrow.down.fill", label: "Vstup",
+                              path: vm.config.inputFolder, action: vm.chooseInputFolder,
+                              onDrop: { vm.config.inputFolder = $0; vm.persistAllDebounced() })
+                    if let chip = vm.inputFolderChipLabel {
+                        inputFolderChip(chip)
+                    }
+                }
                 folderRow(icon: "tray.and.arrow.up.fill", label: "Výstup",
                           path: vm.config.outputFolder, action: vm.chooseOutputFolder,
                           onDrop: { vm.config.outputFolder = $0; vm.persistAllDebounced() })
@@ -267,6 +345,37 @@ struct ContentView: View {
                 vm.invalidateCachedDocumentsIfInputChanged()
             }
         }
+    }
+
+    /// Quick chip under the Vstup row showing the recursive PDF count + total
+    /// size. Aligned under the path display (130 pt label width + 8 pt label
+    /// gap), so it visually attaches to the path it describes. Hidden when no
+    /// scan has run yet — the view's `.onChange(of: inputFolder)` triggers a
+    /// fresh scan as soon as the user picks/drops a folder.
+    private func inputFolderChip(_ label: String) -> some View {
+        let isEmpty = vm.inputFolderPdfCount == 0
+        let tint: Color = isEmpty ? .orange : .blue
+        let icon = isEmpty ? "exclamationmark.triangle.fill" : "doc.fill"
+        return HStack(spacing: 6) {
+            Spacer().frame(width: 138)
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.caption2)
+                    .foregroundStyle(tint)
+                Text(label)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(isEmpty ? tint : .secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.10), in: Capsule())
+            .overlay(Capsule().strokeBorder(tint.opacity(0.30), lineWidth: 0.5))
+            .help(isEmpty
+                  ? "Ve vstupní složce nejsou žádné PDF — vyber jinou složku nebo do této přidej PDF."
+                  : "Recursivní scan vstupní složky.")
+            Spacer()
+        }
+        .padding(.leading, 0)
     }
 
     private func folderRow(
@@ -535,11 +644,11 @@ struct ContentView: View {
     private var modeHintText: String {
         switch vm.config.extractionMode {
         case .fast:
-            return "FAST – jeden požadavek na každý dokument, bez embeddingů."
+            return "FAST – jeden požadavek na každý dokument, bez embeddingů. Vhodné pro krátké zprávy, lab. výsledky a dokumenty, které se vejdou do kontextu modelu."
         case .search:
-            return "SEARCH – per-dokument inference s RAG (relevantní chunky přes embedding model)."
+            return "SEARCH – per-dokument inference s RAG (relevantní chunky přes embedding model). Vhodné pro dlouhé dokumenty, kde stačí pár klíčových pasáží — smlouvy, posudky, technické zprávy."
         case .consolidate:
-            return "CONSOLIDATE – všechny dokumenty v jednom požadavku, jedna agregovaná odpověď. Vyžaduje model s velkým kontextem."
+            return "CONSOLIDATE – všechny dokumenty v jednom požadavku, jedna agregovaná odpověď. Vhodné pro dedupování / shrnutí napříč dávkou. Vyžaduje model s velkým kontextem."
         }
     }
 
@@ -586,12 +695,6 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxHeight: .infinity)
-
-                // Conflict banners: shows a subtle notice whenever the current config
-                // disagrees with what the prompt seems to want. One-click to apply.
-                ForEach(Array(vm.parameterConflicts.enumerated()), id: \.offset) { _, conflict in
-                    conflictBanner(conflict)
-                }
             }
             .onChange(of: vm.selectedPromptFile) { _, newValue in
                 if let newValue {
@@ -815,16 +918,71 @@ struct ContentView: View {
     }
 
     private var progressIdleContent: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "pause.circle.fill")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .symbolRenderingMode(.hierarchical)
-            Text("Připraveno – spusťte zpracování tlačítkem „Spustit\" v horní liště (Cmd+R).")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Spacer()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "pause.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .symbolRenderingMode(.hierarchical)
+                Text("Připraveno – spusťte zpracování tlačítkem „Spustit\" v horní liště (Cmd+R).")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            if let lastRunRow = lastRunIdleSummary {
+                Divider().opacity(0.35)
+                lastRunRow
+            }
         }
+    }
+
+    /// Compact "Poslední běh" row shown in the idle Progress card. Combines the
+    /// per-document baseline persisted from the previous run with the live PDF
+    /// count from `inputFolderPdfCount` to predict the next-run duration before
+    /// the user even presses Run. Hidden when there's no history (first run) or
+    /// no input folder is selected yet.
+    private var lastRunIdleSummary: AnyView? {
+        guard let perDocMs = vm.estimatedPerDocumentMs else { return nil }
+        let perDocSeconds = perDocMs / 1000.0
+
+        let count: Int? = vm.inputFolderPdfCount
+        let predicted: Double? = {
+            guard let count, count > 0 else { return nil }
+            return perDocSeconds * Double(count)
+        }()
+
+        let perDocLabel = humanDuration(perDocSeconds)
+        let predictedLabel = predicted.map { "≈ \(humanDuration($0))" } ?? "—"
+        let countLabel = count.map { "\($0) dok" } ?? "—"
+
+        return AnyView(
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.callout)
+                    .foregroundStyle(.blue)
+                    .symbolRenderingMode(.hierarchical)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Předchozí běh")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        Label("⌀ \(perDocLabel)/dok", systemImage: "speedometer")
+                            .labelStyle(.titleOnly)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Label("Vstup: \(countLabel)", systemImage: "doc.on.doc")
+                            .labelStyle(.titleOnly)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Label("Odhad: \(predictedLabel)", systemImage: "hourglass")
+                            .labelStyle(.titleOnly)
+                            .font(.caption.monospacedDigit().weight(.medium))
+                    }
+                }
+                Spacer()
+            }
+        )
     }
 
     private func progressActiveContent(now: Date) -> some View {
@@ -876,8 +1034,63 @@ struct ContentView: View {
                 Spacer()
             }
 
+            currentlyProcessingRow(state: state)
+
             healthRow(health: health, silent: silent)
         }
+    }
+
+    /// Per-item activity line under the ETA row. Lists up to ~3 file names that
+    /// are *currently* in flight (FAST/SEARCH runs N concurrent inferences) and
+    /// — when nothing is in flight at this exact moment, e.g. between throttle
+    /// pauses — falls back to "naposledy: X" so the user always sees forward
+    /// motion. Hidden when the pipeline doesn't expose per-item events
+    /// (CONSOLIDATE single request).
+    @ViewBuilder
+    private func currentlyProcessingRow(state: SHProgressViewState) -> some View {
+        let inflight = state.currentlyProcessing
+        let last = state.lastFinishedItem
+
+        if inflight.isEmpty && last == nil {
+            EmptyView()
+        } else {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: inflight.isEmpty ? "checkmark.circle" : "gearshape.2.fill")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                    .symbolRenderingMode(.hierarchical)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 2) {
+                    if !inflight.isEmpty {
+                        Text(currentlyProcessingLabel(inflight))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
+                    if let last, last != inflight.first {
+                        Text("Naposledy: \(last)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 4)
+            }
+        }
+    }
+
+    private func currentlyProcessingLabel(_ items: [String]) -> String {
+        guard !items.isEmpty else { return "" }
+        if items.count == 1 {
+            return "Probíhá: \(items[0])"
+        }
+        let head = items.prefix(2).joined(separator: ", ")
+        let extra = items.count - 2
+        return extra > 0
+            ? "Probíhá: \(head) (+\(extra))"
+            : "Probíhá: \(head)"
     }
 
     private var progressFinishedContent: some View {
@@ -989,11 +1202,38 @@ struct ContentView: View {
 
     private var logCard: some View {
         GlassCard(title: "Log", systemImage: "text.alignleft") {
-            // logText mirrors the on-disk log only at phase boundaries (after
-            // preprocessing or extraction finishes). During a long run the user
-            // needs a manual refresh to peek at the live tail.
+            // Toolbar: filter field + copy + refresh. Filter is purely a view
+            // concern (substring match, case-insensitive); the on-disk log is
+            // unchanged, so unchecking the filter shows everything again.
             HStack(spacing: 6) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Filtr (např. ERROR)", text: $logFilter)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(maxWidth: 220)
+                if !logFilter.isEmpty {
+                    Button {
+                        logFilter = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Zrušit filtr")
+                }
                 Spacer()
+                Button {
+                    copyLogToPasteboard()
+                } label: {
+                    Label("Kopírovat", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .tint(.blue)
+                .controlSize(.small)
+                .disabled(filteredLogText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("Zkopírovat zobrazené řádky do schránky")
                 Button {
                     Task { await vm.refreshLog() }
                 } label: {
@@ -1011,7 +1251,7 @@ struct ContentView: View {
             // scroll view owns its momentum without macOS gesture conflicts.
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(vm.logText.isEmpty ? " " : vm.logText)
+                    Text(displayedLogText)
                         .font(.system(size: 10.5, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
@@ -1027,9 +1267,48 @@ struct ContentView: View {
                         proxy.scrollTo("logBottom", anchor: .bottom)
                     }
                 }
+                .onChange(of: logFilter) { _, _ in
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo("logBottom", anchor: .bottom)
+                    }
+                }
             }
         }
         .frame(maxHeight: .infinity)
+    }
+
+    /// Substring-filtered view of `vm.logText`. Empty filter → original text;
+    /// non-empty filter → only lines that contain the term (case-insensitive).
+    /// The header "—" placeholder is returned when the filter excludes
+    /// everything so the ScrollView keeps a non-zero height.
+    private var filteredLogText: String {
+        let term = logFilter.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return vm.logText }
+        let lower = term.lowercased()
+        let kept = vm.logText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { $0.lowercased().contains(lower) }
+        if kept.isEmpty { return "" }
+        return kept.joined(separator: "\n")
+    }
+
+    /// Same as `filteredLogText` but substitutes a single space for the empty
+    /// state so the ScrollView preserves height (matches the original
+    /// `logText.isEmpty ? " " : logText` placeholder convention).
+    private var displayedLogText: String {
+        let text = filteredLogText
+        return text.isEmpty ? " " : text
+    }
+
+    /// Copies the currently displayed log text to the system pasteboard. With an
+    /// active filter, only the visible (matching) lines are copied — that
+    /// matches what the user sees, which is what they almost certainly want.
+    private func copyLogToPasteboard() {
+        let text = filteredLogText
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
     }
 
     // MARK: – Status bar

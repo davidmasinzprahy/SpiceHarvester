@@ -38,6 +38,17 @@ struct SHProgressViewState: Sendable {
     var extractionProgressLabel: String?
     var averageDocumentSeconds: Double = 0
     var etaSeconds: Double = 0
+    /// File names (last path component) currently being processed. In FAST/SEARCH
+    /// modes the pipeline runs up to `maxConcurrentInference` items in parallel,
+    /// so this is a list, not a single value. Empty when nothing is in flight or
+    /// the active phase doesn't expose per-item progress (CONSOLIDATE single
+    /// request).
+    var currentlyProcessing: [String] = []
+    /// Last item the pipeline finished, by name. Drives the "naposledy: X" sub
+    /// label in the progress card so the user always sees that work is moving
+    /// forward, even when nothing is currently in flight (between throttle
+    /// pauses).
+    var lastFinishedItem: String?
 
     var remainingDocuments: Int {
         max(counters.foundPDFs - counters.completed, 0)

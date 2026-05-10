@@ -17,6 +17,15 @@ enum SHExtractionProgressKind: Sendable {
     case lmSteps
 }
 
+/// Per-item lifecycle event emitted by FAST/SEARCH path. CONSOLIDATE doesn't
+/// emit these because the whole batch is one request — there's nothing to name
+/// as "in progress now". Map-reduce uses the same event with a synthetic batch
+/// label so the user sees which segment is running.
+enum SHExtractionItemEvent: Sendable {
+    case started(name: String)
+    case finished(name: String)
+}
+
 final class SHExtractionPipeline {
     // MARK: – Constants
 
@@ -107,7 +116,8 @@ final class SHExtractionPipeline {
         inferenceModel: String,
         embeddingModel: String,
         rerankerModel: String,
-        onProgress: @escaping @Sendable (_ completed: Int, _ total: Int, _ kind: SHExtractionProgressKind) async -> Void
+        onProgress: @escaping @Sendable (_ completed: Int, _ total: Int, _ kind: SHExtractionProgressKind) async -> Void,
+        onItemEvent: @escaping @Sendable (SHExtractionItemEvent) async -> Void = { _ in }
     ) async -> [SHExtractionResult] {
         if mode == .consolidate {
             return await runConsolidated(
@@ -115,7 +125,8 @@ final class SHExtractionPipeline {
                 prompts: prompts,
                 server: server,
                 inferenceModel: inferenceModel,
-                onProgress: onProgress
+                onProgress: onProgress,
+                onItemEvent: onItemEvent
             )
         }
 
@@ -124,9 +135,14 @@ final class SHExtractionPipeline {
         let results = await withTaskGroup(of: SHExtractionResult.self, returning: [SHExtractionResult].self) { group in
             for document in documents {
                 group.addTask {
+                    let name = URL(fileURLWithPath: document.sourceFile).lastPathComponent
                     do {
                         let result = try await self.inferenceQueue.run {
-                            try await self.extractOne(
+                            // The "started" event fires only after the inference
+                            // semaphore lets the document through, so the UI never
+                            // shows a queued document as "currently processing".
+                            await onItemEvent(.started(name: name))
+                            return try await self.extractOne(
                                 document: document,
                                 prompts: prompts,
                                 mode: mode,
@@ -139,6 +155,7 @@ final class SHExtractionPipeline {
                         if self.throttleDelayMs > 0 {
                             try await Task.sleep(nanoseconds: UInt64(self.throttleDelayMs) * 1_000_000)
                         }
+                        await onItemEvent(.finished(name: name))
                         return result
                     } catch is CancellationError {
                         // Don't synthesize a "warning" record for a cancelled task –
@@ -146,20 +163,22 @@ final class SHExtractionPipeline {
                         // explicitly so the user can see which files were skipped.
                         await self.logger.log(
                             level: "WARNING",
-                            file: URL(fileURLWithPath: document.sourceFile).lastPathComponent,
+                            file: name,
                             phase: "INFERENCE",
                             message: "cancelled by user"
                         )
+                        await onItemEvent(.finished(name: name))
                         var cancelled = SHExtractionResult.empty(sourceFile: document.sourceFile)
                         cancelled.warnings = ["Přerušeno uživatelem"]
                         return cancelled
                     } catch {
                         await self.logger.log(
                             level: "ERROR",
-                            file: URL(fileURLWithPath: document.sourceFile).lastPathComponent,
+                            file: name,
                             phase: "INFERENCE",
                             message: error.localizedDescription
                         )
+                        await onItemEvent(.finished(name: name))
                         var fallback = SHExtractionResult.empty(sourceFile: document.sourceFile)
                         fallback.warnings = [error.localizedDescription]
                         return fallback
@@ -190,7 +209,8 @@ final class SHExtractionPipeline {
         prompts: [SHPromptTemplate],
         server: SHServerConfig,
         inferenceModel: String,
-        onProgress: @escaping @Sendable (_ completed: Int, _ total: Int, _ kind: SHExtractionProgressKind) async -> Void
+        onProgress: @escaping @Sendable (_ completed: Int, _ total: Int, _ kind: SHExtractionProgressKind) async -> Void,
+        onItemEvent: @escaping @Sendable (SHExtractionItemEvent) async -> Void = { _ in }
     ) async -> [SHExtractionResult] {
         let total = documents.count
         await onProgress(0, total, .documents)
@@ -287,7 +307,8 @@ final class SHExtractionPipeline {
                     inferenceModel: inferenceModel,
                     sourceLabel: sourceLabel,
                     tokenBudget: tokenBudget,
-                    onProgress: onProgress
+                    onProgress: onProgress,
+                    onItemEvent: onItemEvent
                 )
             } else {
                 await logger.log(
@@ -374,7 +395,8 @@ final class SHExtractionPipeline {
         inferenceModel: String,
         sourceLabel: String,
         tokenBudget: Int,
-        onProgress: @escaping @Sendable (_ completed: Int, _ total: Int, _ kind: SHExtractionProgressKind) async -> Void
+        onProgress: @escaping @Sendable (_ completed: Int, _ total: Int, _ kind: SHExtractionProgressKind) async -> Void,
+        onItemEvent: @escaping @Sendable (SHExtractionItemEvent) async -> Void = { _ in }
     ) async -> [SHExtractionResult] {
         // Per-batch char budget = token budget × chars-per-token minus overhead
         // for the wrapper prompt. Overhead estimate is generous (double the
@@ -425,10 +447,12 @@ final class SHExtractionPipeline {
             ) { group in
                 for (index, batch) in batches.enumerated() {
                     group.addTask {
+                        let label = "Dávka #\(index + 1)/\(batchCount)"
                         do {
                             try Task.checkCancellation()
                             let partial = try await self.inferenceQueue.run {
-                                try await self.runMapBatch(
+                                await onItemEvent(.started(name: label))
+                                return try await self.runMapBatch(
                                     batch: batch,
                                     batchIndex: index + 1,
                                     batchCount: batchCount,
@@ -437,8 +461,10 @@ final class SHExtractionPipeline {
                                     inferenceModel: inferenceModel
                                 )
                             }
+                            await onItemEvent(.finished(name: label))
                             return (index, partial)
                         } catch is CancellationError {
+                            await onItemEvent(.finished(name: label))
                             throw CancellationError()
                         } catch {
                             await self.logger.log(
@@ -447,6 +473,7 @@ final class SHExtractionPipeline {
                                 phase: "MAP[\(index + 1)/\(batchCount)]",
                                 message: error.localizedDescription
                             )
+                            await onItemEvent(.finished(name: label))
                             return (index, "[CHYBA dávky \(index + 1): \(error.localizedDescription)]")
                         }
                     }
@@ -473,8 +500,10 @@ final class SHExtractionPipeline {
         }
 
         // REDUCE: merge partials into a single output in the same schema.
+        let reduceLabel = "Reduce (\(batches.count) dávek)"
         do {
             try Task.checkCancellation()
+            await onItemEvent(.started(name: reduceLabel))
             let finalResponse = try await runReduce(
                 partials: partials,
                 originalPrompt: prompt,
@@ -483,6 +512,7 @@ final class SHExtractionPipeline {
                 batchCount: batches.count,
                 documentHashes: documents.map(\.fileHash)
             )
+            await onItemEvent(.finished(name: reduceLabel))
             var result = bestEffortDecode(json: finalResponse, sourceFile: sourceLabel)
             result.source_file = sourceLabel
             result.warnings.insert(
@@ -492,11 +522,13 @@ final class SHExtractionPipeline {
             await onProgress(totalSteps, totalSteps, .lmSteps)
             return [result]
         } catch is CancellationError {
+            await onItemEvent(.finished(name: reduceLabel))
             var cancelled = SHExtractionResult.empty(sourceFile: sourceLabel)
             cancelled.warnings = ["Přerušeno uživatelem během reduce fáze map-reduce"]
             await onProgress(totalSteps, totalSteps, .lmSteps)
             return [cancelled]
         } catch {
+            await onItemEvent(.finished(name: reduceLabel))
             await logger.log(
                 level: "ERROR",
                 file: "<map-reduce>",
