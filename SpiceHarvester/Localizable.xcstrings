@@ -1,0 +1,458 @@
+{
+  "sourceLanguage" : "cs",
+  "version" : "1.0",
+  "strings" : {
+    "Spice Harvester" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Spice Harvester" } }
+      }
+    },
+    "Nástroj pro hromadné vytěžování dat z dokumentů" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Bulk data extraction from documents" } }
+      }
+    },
+    "Připraveno" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready" } }
+      }
+    },
+    "Zpracovávám…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Processing…" } }
+      }
+    },
+    "Zadej cesty ke složkám" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Set folder paths" } }
+      }
+    },
+    "Můžeš spustit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready to run" } }
+      }
+    },
+    "Server odpojen" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server disconnected" } }
+      }
+    },
+    "Nastav parametry modelu" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Set model parameters" } }
+      }
+    },
+    "Zadej prompt nebo ho načti ze seznamu" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter a prompt or load one from the list" } }
+      }
+    },
+
+    "Začni tady" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Start here" } }
+      }
+    },
+    "Vyber vstupní složku" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose input folder" } }
+      }
+    },
+    "Vyber výstupní složku" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose output folder" } }
+      }
+    },
+    "Server a inference model" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server and inference model" } }
+      }
+    },
+    "Zadej nebo načti prompt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter or load a prompt" } }
+      }
+    },
+    "Sem dej PDF dokumenty, které chceš zpracovat." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Drop PDF documents to process here." } }
+      }
+    },
+    "Sem aplikace zapíše JSON / CSV / TXT a log." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Where the app writes JSON / CSV / TXT and the log." } }
+      }
+    },
+    "Spusť LM Studio nebo MLX, klikni Ověřit a vyber model." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Start LM Studio or MLX, click Verify, and pick a model." } }
+      }
+    },
+    "Prompt definuje schéma výstupu a režim extrakce." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The prompt defines the output schema and extraction mode." } }
+      }
+    },
+    "Vstup" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Input" } }
+      }
+    },
+    "Výstup" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Output" } }
+      }
+    },
+    "Server" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server" } }
+      }
+    },
+    "Prompt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Prompt" } }
+      }
+    },
+    "Cache" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cache" } }
+      }
+    },
+    "Prompty (.md)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Prompts (.md)" } }
+      }
+    },
+
+    "Složky" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Folders" } }
+      }
+    },
+    "Vybrat" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose" } }
+      }
+    },
+    "Změnit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change" } }
+      }
+    },
+    "Vybrat složku ve Finderu" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pick a folder in Finder" } }
+      }
+    },
+    "Vybrat jinou složku" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pick a different folder" } }
+      }
+    },
+    "Žádné PDF" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No PDFs" } }
+      }
+    },
+    "Naposledy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Recent" } }
+      }
+    },
+    "Vybrat jinou složku…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pick a different folder…" } }
+      }
+    },
+    "Vybrat složku…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pick a folder…" } }
+      }
+    },
+
+    "Modely a režim" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Models and mode" } }
+      }
+    },
+    "Ověřit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Verify" } }
+      }
+    },
+    "Ověřeno" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Verified" } }
+      }
+    },
+    "Inference" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Inference" } }
+      }
+    },
+    "Embedding" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Embedding" } }
+      }
+    },
+    "Reranker" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reranker" } }
+      }
+    },
+    "OCR/VLM" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "OCR / VLM" } }
+      }
+    },
+    "Režim extrakce" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Extraction mode" } }
+      }
+    },
+    "Pokročilá nastavení v Předvolbách (Cmd+,)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Advanced settings in Preferences (Cmd+,)" } }
+      }
+    },
+    "Název serveru" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server name" } }
+      }
+    },
+    "API Key (volitelné)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "API Key (optional)" } }
+      }
+    },
+    "-- vyber --" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "-- pick --" } }
+      }
+    },
+    "-- vypnuto --" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "-- off --" } }
+      }
+    },
+    "-- vyber pro VLM --" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "-- pick for VLM --" } }
+      }
+    },
+
+    "Načíst" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Load" } }
+      }
+    },
+    "Zadej prompt…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter a prompt…" } }
+      }
+    },
+    "Vymazat" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear" } }
+      }
+    },
+    "Historie" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "History" } }
+      }
+    },
+    "Ve složce zatím žádné .md" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No .md files in folder yet" } }
+      }
+    },
+    "— vyber —" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "— pick —" } }
+      }
+    },
+
+    "Průběh" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Progress" } }
+      }
+    },
+    "Log" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Log" } }
+      }
+    },
+    "Zbývá:" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remaining:" } }
+      }
+    },
+    "Předchozí běh" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Previous run" } }
+      }
+    },
+    "Filtr (Cmd+F)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Filter (Cmd+F)" } }
+      }
+    },
+    "Kopírovat" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy" } }
+      }
+    },
+    "Obnovit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh" } }
+      }
+    },
+    "Další krok" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Next step" } }
+      }
+    },
+
+    "Spustit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Run" } }
+      }
+    },
+    "Přerušit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop" } }
+      }
+    },
+    "Nápověda" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Help" } }
+      }
+    },
+
+    "Hotovo" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Done" } }
+      }
+    },
+    "Přerušeno" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancelled" } }
+      }
+    },
+    "Selhalo" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Failed" } }
+      }
+    },
+    "Ukončeno" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Ended" } }
+      }
+    },
+    "Potvrdit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Acknowledge" } }
+      }
+    },
+    "Zrušit" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel" } }
+      }
+    },
+
+    "Opravdu vymazat prompt?" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Really clear the prompt?" } }
+      }
+    },
+
+    "Výkon" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Performance" } }
+      }
+    },
+    "OCR" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "OCR" } }
+      }
+    },
+    "Hledat v nastavení…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search settings…" } }
+      }
+    },
+    "Souběžnost" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Concurrency" } }
+      }
+    },
+    "Souběžné inference požadavky" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Concurrent inference requests" } }
+      }
+    },
+    "Souběžné PDF/OCR workery" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Concurrent PDF / OCR workers" } }
+      }
+    },
+    "Throttle mezi požadavky" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Throttle between requests" } }
+      }
+    },
+    "Model a HTTP" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Model and HTTP" } }
+      }
+    },
+    "Kontext modelu" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Model context" } }
+      }
+    },
+    "Timeout požadavku" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Request timeout" } }
+      }
+    },
+    "OCR backend" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "OCR backend" } }
+      }
+    },
+    "Backend" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backend" } }
+      }
+    },
+    "Inferenční cache" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Inference cache" } }
+      }
+    },
+    "Ignorovat cache LLM odpovědí" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Ignore LLM response cache" } }
+      }
+    },
+    "Vyčistit cache" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear cache" } }
+      }
+    },
+
+    "Probíhá: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Running: %@" } }
+      }
+    },
+    "Naposledy: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Last: %@" } }
+      }
+    }
+  }
+}

@@ -632,6 +632,32 @@ final class SHAppViewModel {
                 self?.persistAll()
             }
         }
+
+        // AppIntents bridge: the Shortcuts app / Siri / Spotlight invoke our
+        // intents without holding a reference to this view-model. The intents
+        // post these notifications and we react here. See `SHAppIntents.swift`
+        // for the producing side.
+        if #available(macOS 13.0, *) {
+            NotificationCenter.default.addObserver(
+                forName: SHIntentNotifications.runAll,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, !self.isRunning, self.canRunAll else { return }
+                    await self.runAll()
+                }
+            }
+            NotificationCenter.default.addObserver(
+                forName: SHIntentNotifications.openOutput,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.openOutput()
+                }
+            }
+        }
     }
 
     var selectedServerIndex: Int {
