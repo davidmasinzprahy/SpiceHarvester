@@ -44,8 +44,6 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     header
                     leftConfigurationCards
-                    Divider().opacity(0.4)
-                    runtimeHeaderSpacer
                 }
                 .padding(14)
                 .frame(minWidth: 460, idealWidth: 540)
@@ -62,15 +60,17 @@ struct ContentView: View {
                     notificationStack
                     VSplitView {
                         // Vertical insets on each pane create a visible gap
-                        // around the resize handle. Without them VSplitView
-                        // draws cards touching the divider line, which reads
-                        // as one merged block instead of three resizable
-                        // sections. ~5 pt above/below = ~10 pt total gap.
+                        // around the resize handle, plus a tiny "grip" pill
+                        // overlay tells the user the divider is draggable.
+                        // Without the grip, hover-only discoverability is
+                        // poor — many users never realize the panes resize.
                         promptsCard
                             .padding(.bottom, 5)
+                            .overlay(alignment: .bottom) { dragHandleGrip }
                             .frame(minHeight: 170, idealHeight: 290, maxHeight: .infinity)
                         progressStatusCard
                             .padding(.vertical, 5)
+                            .overlay(alignment: .bottom) { dragHandleGrip }
                             .frame(minHeight: 80, idealHeight: 120)
                         logCard
                             .padding(.top, 5)
@@ -92,6 +92,7 @@ struct ContentView: View {
         .onChange(of: vm.config.inputFolder) { _, _ in
             vm.refreshInputFolderStats()
         }
+        .toolbar { windowToolbar }
         .sheet(isPresented: $showHelp) {
             HelpSheet(dismiss: { showHelp = false })
         }
@@ -213,6 +214,74 @@ struct ContentView: View {
         return fields
     }
 
+    // MARK: – Window toolbar
+
+    /// macOS window toolbar: status indicator on the left, Run/Stop +
+    /// Output + Help on the right. Run as the rightmost (primary) action
+    /// matches Xcode's pattern and AppKit's `NSToolbarItem.Identifier`
+    /// convention. The bottom-of-left-column run row was removed when
+    /// these moved to the toolbar — Run is one of the most-clicked
+    /// controls in the app and belongs in the persistent chrome.
+    @ToolbarContentBuilder
+    private var windowToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            statusIndicator
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                showHelp = true
+            } label: {
+                Label("Nápověda", systemImage: "questionmark.circle")
+            }
+            .focused($focus, equals: .help)
+            .help("Otevřít nápovědu (Cmd+?)")
+
+            Button {
+                vm.openOutput()
+            } label: {
+                Label("Výstup", systemImage: "folder")
+            }
+            .disabled(!vm.canOpenOutput)
+            .focused($focus, equals: .output)
+            .help("Otevřít složku výstupu ve Finderu (Cmd+Shift+O)")
+
+            if vm.isRunning {
+                Button(role: .destructive) {
+                    vm.cancelRun()
+                } label: {
+                    Label("Přerušit", systemImage: "stop.circle.fill")
+                }
+                .focused($focus, equals: .cancel)
+                .help("Přeruší aktuálně běžící úlohu (Cmd+.)")
+            } else {
+                Button {
+                    Task { await vm.runAll() }
+                } label: {
+                    Label("Spustit", systemImage: "play.fill")
+                }
+                .disabled(!vm.canRunAll)
+                .focused($focus, equals: .run)
+                .help(vm.missingRequirementsHint
+                      ?? "Spustí kompletní pipeline: předzpracování + extrakci (Cmd+R)")
+            }
+        }
+    }
+
+    /// Tiny pill-shaped affordance that signals "this edge is draggable".
+    /// Placed at the bottom of every VSplitView pane except the last — so the
+    /// indicator visually attaches to the divider line. `allowsHitTesting`
+    /// false because the actual drag region is wider (handled by VSplitView)
+    /// and we don't want the pill to intercept clicks the user aimed at the
+    /// card content right above it.
+    private var dragHandleGrip: some View {
+        Capsule()
+            .fill(Color.primary.opacity(0.18))
+            .frame(width: 32, height: 3)
+            .padding(.bottom, -1)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
     /// Right-column notification stack: completion banner first (post-run), then
     /// any active config conflicts. Both used to live in different places — the
     /// completion in the right column, conflicts under the prompt editor — which
@@ -240,6 +309,7 @@ struct ContentView: View {
             }
             foldersCard
             serverCard
+            modelsCard
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -295,7 +365,6 @@ struct ContentView: View {
     /// numeric index (or check) and an abbreviated label so the whole row
     /// fits even at the narrowest configured column width (460 pt).
     private func onboardingChip(step: SHSetupStep, index: Int) -> some View {
-        let tint: Color = step.isDone ? .green : .secondary
         let shortLabel: String = {
             switch step.id {
             case "input":  return "Vstup"
@@ -305,80 +374,56 @@ struct ContentView: View {
             default:       return step.title
             }
         }()
-        return HStack(spacing: 5) {
-            ZStack {
-                Circle()
-                    .fill(step.isDone ? Color.green : Color.primary.opacity(0.06))
-                    .frame(width: 18, height: 18)
-                Circle()
-                    .strokeBorder(step.isDone ? Color.green : Color.primary.opacity(0.20), lineWidth: 0.8)
-                    .frame(width: 18, height: 18)
-                if step.isDone {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
-                } else {
-                    Text("\(index)")
-                        .font(.caption2.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(.secondary)
+        return Button {
+            focusOnboardingTarget(for: step.id)
+        } label: {
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle()
+                        .fill(step.isDone ? Color.green : Color.primary.opacity(0.06))
+                        .frame(width: 18, height: 18)
+                    Circle()
+                        .strokeBorder(step.isDone ? Color.green : Color.primary.opacity(0.20), lineWidth: 0.8)
+                        .frame(width: 18, height: 18)
+                    if step.isDone {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                    } else {
+                        Text("\(index)")
+                            .font(.caption2.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                Text(shortLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(step.isDone ? .secondary : .primary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
-            Text(shortLabel)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(step.isDone ? .secondary : .primary)
-                .lineLimit(1)
-                .fixedSize()
+            .contentShape(Rectangle())
         }
-        .help(step.title + " – " + step.hint)
-        .accessibilityLabel("\(step.title): \(step.isDone ? "hotovo" : "ještě nehotovo")")
+        .buttonStyle(.plain)
+        .help(step.title + " – " + step.hint + " (klikni pro skok do sekce)")
+        .accessibilityLabel("\(step.title): \(step.isDone ? "hotovo" : "ještě nehotovo"). Klikni pro skok.")
+    }
+
+    /// Maps an onboarding step id to the focus target the user lands on after
+    /// clicking the chip. The chip is a hint, so we focus the **first
+    /// actionable control** of that section: the Vybrat button for folders,
+    /// Verify for the server card, the prompt editor for prompts. The
+    /// existing focus ring then makes it obvious where the user should act.
+    private func focusOnboardingTarget(for stepID: String) {
+        switch stepID {
+        case "input":  focus = .inputFolder
+        case "output": focus = .outputFolder
+        case "server": focus = .verifyServer
+        case "prompt": focus = .promptEditor
+        default: break
+        }
     }
 
     // MARK: – Runtime actions
-
-    private var toolbarActions: some View {
-        HStack(spacing: 10) {
-            if vm.isRunning {
-                Button(role: .destructive) {
-                    vm.cancelRun()
-                } label: {
-                    Label("Přerušit", systemImage: "stop.circle.fill")
-                }
-                .labelStyle(.titleAndIcon)
-                .focused($focus, equals: .cancel)
-                .help("Přeruší aktuálně běžící úlohu (Cmd+.)")
-            } else {
-                Button {
-                    Task { await vm.runAll() }
-                } label: {
-                    Label("Spustit", systemImage: "play.fill")
-                }
-                .labelStyle(.titleAndIcon)
-                .disabled(!vm.canRunAll)
-                .focused($focus, equals: .run)
-                .help(vm.missingRequirementsHint
-                      ?? "Spustí kompletní pipeline: předzpracování + extrakci (Cmd+R)")
-            }
-
-            Button {
-                vm.openOutput()
-            } label: {
-                Label("Výstup", systemImage: "folder")
-            }
-            .labelStyle(.titleAndIcon)
-            .disabled(!vm.canOpenOutput)
-            .focused($focus, equals: .output)
-            .help("Otevřít složku výstupu ve Finderu (Cmd+Shift+O)")
-
-            Button {
-                showHelp = true
-            } label: {
-                Label("Nápověda", systemImage: "questionmark.circle")
-            }
-            .labelStyle(.titleAndIcon)
-            .focused($focus, equals: .help)
-            .help("Otevřít nápovědu (Cmd+?)")
-        }
-    }
 
     private var statusIndicator: some View {
         HStack(spacing: 8) {
@@ -430,21 +475,6 @@ struct ContentView: View {
 
             Spacer()
         }
-    }
-
-    /// Bottom-of-left-column run bar: status indicator on the left, the action
-    /// trio (Spustit / Výstup / Nápověda) on the right. The whole row is
-    /// pinned to the bottom of the configuration column so "set up here, run
-    /// here" forms a single visual flow without scattering controls across
-    /// the window. Name kept for git-blame continuity even though the row
-    /// is no longer a "header spacer".
-    private var runtimeHeaderSpacer: some View {
-        HStack {
-            statusIndicator
-            Spacer()
-            toolbarActions
-        }
-        .frame(minHeight: 46)
     }
 
     /// Header logo with a subtle "grinding" wobble while a run is in progress.
@@ -611,19 +641,32 @@ struct ContentView: View {
         }
     }
 
-    // MARK: – Server / model
+    // MARK: – Server / Modely a režim
 
+    /// Server card hosts only "kde běží AI" data: server registry picker,
+    /// connection details, verify button. Models and extraction mode were
+    /// split out into `modelsCard` because cramming five distinct concepts
+    /// (server registry / connection details / 4 model pickers / mode) into
+    /// one card made it visually overwhelming and hard to scan.
     private var serverCard: some View {
-        GlassCard(title: "Server a model", systemImage: "server.rack") {
+        GlassCard(title: "Server", systemImage: "server.rack") {
             VStack(alignment: .leading, spacing: 10) {
                 serverPickerRow
 
                 if vm.servers.indices.contains(vm.selectedServerIndex) {
                     serverDetailFields
                 }
+            }
+        }
+    }
 
-                Divider().opacity(0.4)
-
+    /// Models + extraction mode card. Embedding and Reranker pickers are
+    /// hidden outside SEARCH mode — they're only consulted for RAG retrieval,
+    /// so showing them in FAST/CONSOLIDATE was visual noise that confused
+    /// new users into selecting them "just in case".
+    private var modelsCard: some View {
+        GlassCard(title: "Modely a režim", systemImage: "cpu") {
+            VStack(alignment: .leading, spacing: 10) {
                 modelPickersGrid
 
                 Divider().opacity(0.4)
@@ -718,10 +761,11 @@ struct ContentView: View {
     }
 
     private var modelPickersGrid: some View {
-        // 2×2 grid scales down better than two HStacks at the narrower
-        // configuration column width, and keeps related pickers paired
-        // visually (Inference + Embedding for retrieval, Reranker + OCR for
-        // post-processing).
+        // Always-visible row holds Inference + OCR/VLM (used by every mode).
+        // Embedding + Reranker only matter for SEARCH (RAG retrieval), so
+        // they're hidden in FAST / CONSOLIDATE — showing them there was
+        // pure visual noise that pushed inexperienced users to "set them
+        // just in case" and then wonder why nothing changed.
         Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
             GridRow {
                 modelPicker(title: "Inference",
@@ -730,26 +774,28 @@ struct ContentView: View {
                                 set: { vm.setInferenceModel($0) }
                             ),
                             placeholder: "-- vyber --")
-                modelPicker(title: "Embedding",
-                            selection: Binding(
-                                get: { vm.config.selectedEmbeddingModel },
-                                set: { vm.setEmbeddingModel($0) }
-                            ),
-                            placeholder: "-- vypnuto --")
-            }
-            GridRow {
-                modelPicker(title: "Reranker",
-                            selection: Binding(
-                                get: { vm.config.selectedRerankerModel },
-                                set: { vm.setRerankerModel($0) }
-                            ),
-                            placeholder: "-- vypnuto --")
                 modelPicker(title: "OCR/VLM",
                             selection: Binding(
                                 get: { vm.config.selectedOCRModel },
                                 set: { vm.setOCRModel($0) }
                             ),
                             placeholder: "-- vyber pro VLM --")
+            }
+            if vm.config.extractionMode == .search {
+                GridRow {
+                    modelPicker(title: "Embedding",
+                                selection: Binding(
+                                    get: { vm.config.selectedEmbeddingModel },
+                                    set: { vm.setEmbeddingModel($0) }
+                                ),
+                                placeholder: "-- vypnuto --")
+                    modelPicker(title: "Reranker",
+                                selection: Binding(
+                                    get: { vm.config.selectedRerankerModel },
+                                    set: { vm.setRerankerModel($0) }
+                                ),
+                                placeholder: "-- vypnuto --")
+                }
             }
         }
     }
@@ -862,6 +908,7 @@ struct ContentView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
                         )
+                        .focused($focus, equals: .promptEditor)
 
                     if vm.config.currentPrompt.isEmpty {
                         Text("Zadej prompt…")
@@ -1116,6 +1163,12 @@ struct ContentView: View {
     /// no input folder is selected yet.
     private var lastRunIdleSummary: AnyView? {
         guard let perDocMs = vm.estimatedPerDocumentMs else { return nil }
+        // A baseline below ~100 ms means the previous run was effectively
+        // all cache-hits (or there were no real documents). Showing
+        // "≈ 1 ms × N dok" gives a misleadingly fast estimate, so hide the
+        // row entirely — the user will get a fresh real-world baseline as
+        // soon as they trigger a non-cached run.
+        guard perDocMs >= 100 else { return nil }
         let perDocSeconds = perDocMs / 1000.0
 
         let count: Int? = vm.inputFolderPdfCount
@@ -1544,8 +1597,8 @@ enum SHFocusField: Hashable {
     case inputFolder, outputFolder, cacheFolder, promptFolder
     // Server
     case verifyServer
-    // Prompt toolbar
-    case loadPrompts, noThink, think, clearPrompt
+    // Prompt
+    case loadPrompts, noThink, think, clearPrompt, promptEditor
     // Bottom run-bar
     case run, cancel, output, help
 }
