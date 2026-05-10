@@ -433,9 +433,17 @@ final class SHAppViewModel {
     /// for the consolidate-ignores-concurrency notice which has no
     /// corrective action — the user has read it, doesn't need to be
     /// reminded every keystroke. Re-appears on next launch.
+    ///
+    /// Single source of truth: only `dismissedConflictIDs` is the
+    /// authority. `displayedConflicts` is a debounced cache that
+    /// `scheduleConflictUpdate(after: 0)` immediately rebuilds —
+    /// previously this method also imperatively mutated
+    /// `displayedConflicts`, which created a dual-source-of-truth bug
+    /// (out-of-band callers writing to `displayedConflicts` would lose
+    /// the dismissal until the next debounced refresh).
     func dismissConflict(_ conflict: SHParameterConflict) {
         dismissedConflictIDs.insert(conflict.dismissID)
-        displayedConflicts.removeAll { $0.dismissID == conflict.dismissID }
+        scheduleConflictUpdate(after: 0)
     }
 
     /// All currently-active conflicts between `config` and `config.currentPrompt`.
@@ -1620,17 +1628,23 @@ final class SHAppViewModel {
         // Set categoryIdentifier so the system attaches the "Otevřít
         // výstup" action button defined in `setNotificationCategories`.
         content.categoryIdentifier = SHCompletionNotification.categoryID
+        // Notification banners appear on the lock screen by default and
+        // are visible to anyone who can see the user's display. The
+        // pipeline's `statusText` may contain filenames, error messages
+        // and (in the medical-records context this app was originally
+        // built for) PHI fragments. Use minimal, generic body text and
+        // let the user open the app for the full status.
         switch outcome {
         case .success:
             content.title = "Spice Harvester: hotovo"
-            content.body = statusText
+            content.body = "Pipeline byla úspěšně dokončena. Klikni Otevřít výstup pro výsledky."
             content.sound = .default
         case .cancelled:
             content.title = "Spice Harvester: přerušeno"
-            content.body = statusText
+            content.body = "Běh byl přerušen uživatelem."
         case .failed:
             content.title = "Spice Harvester: chyba"
-            content.body = statusText
+            content.body = "Pipeline selhala. Detaily v hlavním okně aplikace."
             content.sound = .default
         case .notStarted:
             return

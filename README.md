@@ -19,6 +19,7 @@ Výchozí režim je **FAST** (bez embeddingů).
 ## Obsah
 
 - [Klíčové funkce](#klíčové-funkce)
+- [Bezpečnost](#bezpečnost)
 - [Rychlý start](#rychlý-start)
 - [Režimy extrakce](#režimy-extrakce)
 - [Výstupní formát](#výstupní-formát)
@@ -179,6 +180,24 @@ Steppery v **Předvolbách → Výkon** (`Cmd+,`):
 
 - **Předvolby → Cache → Vyčistit cache** smaže JSON soubory per-dokument cache **i** per-inference cache.
 - Nebo ručně: smaž obsah cache složky.
+
+## Bezpečnost
+
+### Sandbox a entitlementy
+- **App Sandbox** zapnutý (`com.apple.security.app-sandbox`).
+- **`NSAllowsLocalNetworking`** — ATS povolen pouze pro local network (LM Studio na localhost). Zpřísněno z `NSAllowsArbitraryLoads`, který by povoloval libovolné HTTP cíle.
+- **`com.apple.security.files.user-selected.read-write`** — přístup pouze ke složkám, které uživatel explicitně vybral přes NSOpenPanel + jejich security-scoped bookmarks.
+- **`com.apple.security.network.client`** — odchozí HTTP požadavky na LM server.
+- **`com.apple.security.network.server`** — historicky vyžadováno pro localhost connections v některých macOS verzích. Pro pure-client app technicky nadbytečné, ale ponecháno z důvodu kompatibility.
+
+### Citlivá data
+- **API klíče** v `SHServerConfig.apiKey` jsou aktuálně **plaintext v UserDefaults** (sandbox container `~/Library/Containers/.../Preferences/`). Pro lokální LM Studio (default bez auth) je pole prázdné, takže expozice je teoretická. Pro hosted OpenAI-compatible proxy s bearer tokenem je třeba pamatovat, že token přežívá v UserDefaults. Migrace na Keychain je v [docs/P2_BACKLOG_DEFERRED.md](docs/P2_BACKLOG_DEFERRED.md).
+- **Notifikační banner** (success/cancelled/failed) obsahuje pouze **generický text** — žádné filename, error detail nebo PHI. Detaily ostávají v hlavním okně. Důvod: notifikace jsou viditelné na lock screenu i ostatním lidem.
+- **Log v `processing.log`** může obsahovat names PDF souborů, error stacks a (v medical-records kontextu) PHI fragmenty. Soubor žije ve výstupní složce uživatele — uživatel je odpovědný za její ochranu.
+- **Pasteboard** přes Cmd+C v log card nebo drag-out z Output button — uživatelem iniciovaný kopírovací akt; obsah jde mimo aplikaci (Slack, Mail, Finder) podle vůle uživatele.
+
+### Quick Look extension (deferred)
+Source je připravený s HTML escape pro `source_file` title (XSS guard) — viz [SHQuickLookPreview.swift](SpiceHarvester/QuickLook/SHQuickLookPreview.swift). Aktivace vyžaduje nový Xcode target.
 
 ## Persistence
 

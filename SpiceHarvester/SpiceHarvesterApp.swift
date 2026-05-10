@@ -176,6 +176,12 @@ struct SpiceHarvesterApp: App {
             }
         }
 
+        // Settings sheet is intentionally always bound to the *primary*
+        // window's view-model. Performance prefs (concurrency, throttle,
+        // request timeout, OCR backend, cache toggle) are app-level
+        // global tuning — having Settings follow the focused window
+        // would mean scratch windows could silently override those
+        // values, surprising the next primary-window run. By design.
         Settings {
             SettingsView(vm: vm)
         }
@@ -196,6 +202,13 @@ struct SpiceHarvesterApp: App {
 /// menu item. Help sheet flag is local because the primary window's
 /// help-flag would be a coordination headache across windows for no
 /// real benefit (each window can show its own help if requested).
+///
+/// `@State` initializer is lazy on macOS 14+/iOS 17+ — the
+/// `SHAppViewModel(persistenceMode: .scratch)` expression evaluates once
+/// per view instance, not on every body recomputation. Our deployment
+/// target is macOS 15.6 so this pattern is safe; on older OS versions
+/// SwiftUI would re-evaluate the initializer on rebuild and we'd need
+/// the `@State var vm: SHAppViewModel?` + `.onAppear` workaround.
 struct SHScratchRoot: View {
     @State private var vm = SHAppViewModel(persistenceMode: .scratch)
     @State private var showHelp = false
