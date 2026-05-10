@@ -14,14 +14,16 @@ left to right direction
 actor "Uživatel" as User
 
 package "UI" {
-  [SpiceHarvesterApp\n(WindowGroup + Settings\nScene + .commands)] as APP
-  [ContentView\n(HSplitView, toolbar,\nGlass cards)] as CV
-  [SettingsView\n(Settings scene + custom tab selector\nVýkon/OCR/Cache)] as SET
+  [SpiceHarvesterApp\n(WindowGroup main + scratch\n+ Settings + .commands\n+ SHAppDelegate)] as APP
+  [ContentView\n(HSplitView, runRow,\nVSplitView right column)] as CV
+  [SettingsView\n(Settings scene + custom tab selector\nVýkon/OCR/Cache + search)] as SET
   [HelpSheet] as HELP
+  [SHLogTextView\n(NSViewRepresentable\nNSTextView severity coloring)] as LOGV
+  [SHAppIntents\n(RunIntent / OpenOutputIntent\nAppShortcutsProvider)] as INTENTS
 }
 
 package "Presentation" {
-  [SHAppViewModel\n(@Observable MVVM)\nRunOutcome klasifikace\nParameter conflicts] as VM
+  [SHAppViewModel\n(@Observable @MainActor)\nPersistenceMode (.persistent/.scratch)\nRunOutcome klasifikace\nServer health watcher\nProject save/load] as VM
 }
 
 package "Pipeline" {

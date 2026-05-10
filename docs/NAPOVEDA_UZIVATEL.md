@@ -5,24 +5,75 @@ Tento návod odpovídá aktuálnímu UI aplikace Spice Harvester.
 ## Layout aplikace
 
 Hlavní okno je dvousloupcové:
-- **Vlevo (konfigurace):** Složky · Server a model · Prompt
-- **Vpravo (běh):** Průběh · Log
+- **Vlevo (konfigurace + ovládání):**
+  - Onboarding strip (zmizí po dokončení 4 kroků)
+  - Složky · Server · Modely a režim
+  - Dělící čára
+  - Status pill + **Spustit / Výstup / Nápověda**
+- **Vpravo (workspace):**
+  - Notifikační bannery (completion + konflikty)
+  - **VSplitView** s tažitelnými dělítky: Prompt → Průběh → Log
 
-Rozdělovač mezi sloupci lze tahat. **Horní lišta okna (toolbar)** drží stav aplikace (Připraveno / Zpracovávám…) a hlavní akční tlačítka — **Spustit / Přerušit / Výstup / Nápověda**. Dole je **status bar** s podrobnějším textovým stavem.
+Rozdělovač mezi sloupci lze tahat. Mezi Prompt / Průběh / Log jsou tažitelná dělítka VSplitView (drobné šedé pily uprostřed dělítka). Dole je **status bar** s textovým runtime stavem; **auto-collapse** když je text default „Připraveno".
 
-Pokročilá nastavení (souběžnost, throttle, kontext modelu, timeout, OCR backend, cache) jsou v **Předvolbách** (`Cmd+,`).
+Pokročilá nastavení (souběžnost, throttle, kontext modelu, timeout, OCR backend, cache) jsou v **Předvolbách** (`Cmd+,`) — fulltextové vyhledávání nahoře.
+
+## Multi-window
+
+- **Cmd+Shift+N** otevře *scratch* okno s vlastní prázdnou konfigurací
+- Scratch okno **nepersistuje** do UserDefaults (server registry sdílen, ostatní per-session)
+- Pro persistování: **Uložit projekt jako…** (Cmd+Shift+S) → `.spiceharvester.json`
+
+## Save / Open Project
+
+- **Cmd+Shift+S** — uloží snapshot folderů, modelů, promptu a režimu do `.spiceharvester.json`
+- **Cmd+O** — načte projekt zpět; sandbox bookmarky **nelze obejít**, takže pokud cesty z projektu nebyly v této instalaci dosud vybrány, aplikace upozorní alertem a uživatel musí re-pick
+- **Server registry** se neukládá do projektu (servery jsou globální per-installation)
 
 ## Klávesové zkratky
 
+### Pipeline
 | Akce | Zkratka |
 |---|---|
 | Spustit | **Cmd+R** |
 | Přerušit | **Cmd+.** |
 | Předzpracování | **Cmd+Shift+P** |
 | Extrakce | **Cmd+Shift+E** |
+| Režim **FAST** | **Cmd+1** |
+| Režim **SEARCH** | **Cmd+2** |
+| Režim **CONSOLIDATE** | **Cmd+3** |
+
+### Soubory a okna
+| Akce | Zkratka |
+|---|---|
+| Otevřít projekt… | **Cmd+O** |
+| Uložit projekt jako… | **Cmd+Shift+S** |
+| Nové okno (scratch) | **Cmd+Shift+N** |
 | Otevřít výstup ve Finderu | **Cmd+Shift+O** |
+
+### Editor a navigace
+| Akce | Zkratka |
+|---|---|
+| Zpět (po Vymazat prompt) | **Cmd+Z** |
+| Fokus filtru logu | **Cmd+F** |
+| Tab / Shift+Tab | cyklus mezi aktivními tlačítky |
+| Esc | uvolnit textový vstup, fokus skočí na Spustit |
+
+### App
+| Akce | Zkratka |
+|---|---|
 | Předvolby | **Cmd+,** |
 | Nápověda | **Cmd+?** |
+
+> Tab/Shift+Tab cyklus funguje **i bez** systémového *Keyboard Navigation* (System Settings → Keyboard) — aplikace má vlastní `NSEvent` monitor a respektuje stejné `canX` predikáty jako disabled state tlačítek.
+
+## Shortcuts.app + Siri
+
+V macOS Shortcuts.app jsou registrované akce:
+- **Spustit SpiceHarvester** — spustí pipeline s aktuální konfigurací (jen v primary okně)
+- **Otevřít výstup SpiceHarvester** — otevře výstupní složku ve Finderu
+
+Frází: *„Spusť SpiceHarvester"* / *„Run SpiceHarvester"* / *„Otevři výstup z SpiceHarvester"*. Dostupné v Spotlight i Siri (macOS 14+).
 
 ## Rychlý start
 
@@ -37,16 +88,21 @@ Pokročilá nastavení (souběžnost, throttle, kontext modelu, timeout, OCR bac
    >
    > **Tip 2:** po prvním výběru se další picker otevře v nadřazené složce tvého výběru. Sourozenecké složky projektu jsou tak na jeden klik.
 
-3. V sekci **Server a model**:
+3. V sekci **Server**:
    - vyber nebo přidej server (výchozí je `http://localhost:1234/v1` pro LM Studio; MLX preset používá `http://localhost:8000/v1`)
-   - klikni **Ověřit** — tlačítko zezelená na **Ověřeno**, statusbar ukáže počet modelů a u LM Studia také auto-detekovaný kontext (např. *"modely: 3 · kontext 32k tok."*)
-   - vyber **Inference model** z aktuálně načteného seznamu modelů
-   - pro SEARCH vyber **Embedding** model; volitelně i **Reranker**
-   - pro skenované PDF s VLM OCR vyber i **OCR/VLM** model. (Výběr backendu Apple Vision / oMLX/VLM / Vision→VLM je v **Předvolbách → OCR**.)
-4. V sekci **Prompt**:
+   - **Inline validace URL**: pokud je Base URL malformed (chybí `http://`, hostitel atd.), vedle pole se objeví ⚠️ ikona — **Ověřit** by stejně selhal po HTTP timeoutu, ale tady to vidíš okamžitě
+   - klikni **Ověřit** — tlačítko zezelená na **Ověřeno**, statusbar ukáže počet modelů a u LM Studia také auto-detekovaný kontext
+   - **Health watcher** — po Ověřit aplikace každých 30 s pinguje server. Když přestane odpovídat, status pill se přebarví červeně na **„Server odpojen"** — uvidíš to ještě než klikneš Spustit
+4. V sekci **Modely a režim**:
+   - vyber **Inference** model + případně **OCR/VLM** model
+   - **Embedding** + **Reranker** pickery se zobrazí jen v režimu **SEARCH** (jinak by byly visual noise)
+   - vyber **Režim extrakce** — **Cmd+1** / **Cmd+2** / **Cmd+3** přepínají FAST / SEARCH / CONSOLIDATE bez kliknutí myší
+5. V sekci **Prompt**:
    - napiš prompt přímo do editoru, nebo
    - klikni **Načíst** a vyber `.md` v pickeru — obsah se vloží do editoru
-5. V toolbaru klikni **Spustit** (nebo `Cmd+R`).
+   - **Historie** menu vedle Načíst nabízí 8 naposledy spuštěných promptů (z úspěšných runů)
+   - **Fullscreen toggle** (`↗` ikona vpravo) — Prompt zabere celý pravý sloupec; auto-collapse při startu runu
+6. Stiskni **Spustit** (nebo `Cmd+R`).
 
 ## Barvy a co znamenají
 
@@ -58,19 +114,23 @@ Pokročilá nastavení (souběžnost, throttle, kontext modelu, timeout, OCR bac
 
 ## Co dělají tlačítka
 
-### Toolbar (horní lišta okna)
-- **Stav (vlevo)** — zelená tečka + „Připraveno" v idle, spinner + „Zpracovávám…" během běhu.
-- **Spustit / Přerušit (Cmd+R / Cmd+.)** — jeden slot, ve kterém se ikona mění podle běhu. „Přerušit" je červené (`role: .destructive`).
-- **Výstup (Cmd+Shift+O)** — otevře výstupní složku ve Finderu. Disabled, dokud nemáš nastavenou výstupní složku.
+### Run row (spodek levého sloupce)
+- **Status pill (vlevo)** — call-to-action: „Zadej cesty ke složkám", „Můžeš spustit", „Server odpojen" (červeně po health-watcher detekci). Při běhu spinner + „Zpracovávám…".
+- **Spustit / Přerušit (Cmd+R / Cmd+.)** — jeden slot. **Spustit** je `.borderedProminent` modré (primary CTA), **Přerušit** je `.bordered` červené (destructive). Při běhu se přepne automaticky.
+- **Výstup (Cmd+Shift+O)** — otevře výstupní složku ve Finderu. Také je to **drag source**: přetáhni tlačítko na Finder / Slack / Mail = output folder se předá jako file representation.
 - **Nápověda (Cmd+?)** — otevře help sheet (toto okno).
+- **Adaptive labels**: když je okno úzké (~< 940 pt), tlačítka se zobrazí jen jako ikony (tooltipy zachovány).
 
 ### Konfigurační sloupec
-- **Vybrat / Změnit (folder row)** — otevře `NSOpenPanel`. Cestu lze také jednoduše přetáhnout z Finderu na policko cesty.
+- **Vybrat / Změnit (folder row)** — otevře `NSOpenPanel`. Po prvním picknutí se z buttonu stane **Menu** s submenu „Naposledy" obsahující 5 nejnovějších cest pro tento slot (per-kind: Vstup / Výstup / Cache / Prompty). Cestu lze také přetáhnout z Finderu.
+- **PDF chip pod Vstup row** — po vybrání vstupní složky aplikace zobrazí počet PDF + celkovou velikost (`23 PDF · 142 MB`). Oranžový chip „Žádné PDF" pokud složka neobsahuje žádné PDF. Async scan, neblokuje main thread.
 - **+ / − server** — přidá / odebere registry položku. Vedle je preset **MLX** (přidá `http://localhost:8000/v1`).
-- **Ověřit / Ověřeno (server)** — otestuje lokální OpenAI-compatible server (`/v1/models`), načte seznam modelů a u LM Studia navíc přes `/api/v0/models` auto-nastaví **Kontext modelu** ze skutečné hodnoty `loaded_context_length`. U MLX/obecných backendů status bar ukáže `kontext ručně` a hodnotu nastavíš v **Předvolbách → Výkon**. Po přepnutí mezi LM Studio/MLX aplikace vyčistí předchozí model selections; po ověření zkontroluj **Inference** i **Embedding** picker proti nově načtenému seznamu. Při úspěchu zůstává **zelené "Ověřeno"** dokud nezměníš URL / API key / vybraný server.
+- **Ověřit / Ověřeno (server)** — otestuje lokální OpenAI-compatible server (`/v1/models`), načte seznam modelů a u LM Studia navíc přes `/api/v0/models` auto-nastaví **Kontext modelu** ze skutečné hodnoty `loaded_context_length`. U MLX/obecných backendů status bar ukáže `kontext ručně` a hodnotu nastavíš v **Předvolbách → Výkon**. Po přepnutí mezi LM Studio/MLX aplikace vyčistí předchozí model selections; po ověření zkontroluj **Inference** i **Embedding** picker proti nově načtenému seznamu. Při úspěchu zůstává **zelené "Ověřeno"** dokud nezměníš URL / API key / vybraný server. Po Ověřit se aktivuje **30 s health watcher** (viz výše).
 - **Načíst (prompt)** — oskenuje prompt folder, naplní picker souborů (`.md`).
+- **Historie (prompt)** — Menu se 8 naposledy spuštěnými prompty (zaznamenané automaticky při Spustit).
 - **nothink / think** — vloží do promptu instrukci `/no_think` nebo `/think` pro modely, které tento režim podporují (Qwen3, DeepSeek-R1).
-- **Vymazat (prompt)** — vyčistí editor promptu.
+- **Fullscreen toggle (↗ ikona)** — Prompt zabere celý pravý sloupec; auto-collapse při Spustit.
+- **Vymazat (prompt)** — `.bordered` červené, vyžaduje confirmation dialog. **Cmd+Z obnoví** (NSUndoManager). Cmd+Shift+Z znovu vymaže.
 
 ### Menu File (klávesové zkratky)
 - **Spustit (Cmd+R)** — alias k toolbar buttonu.
@@ -79,8 +139,20 @@ Pokročilá nastavení (souběžnost, throttle, kontext modelu, timeout, OCR bac
 - **Extrakce (Cmd+Shift+E)** — spustí pouze FÁZI 2 (LLM extrakce nad cache); automaticky doplní předzpracování, pokud ještě nejsou data.
 
 ### Runtime sloupec
-- **Hotovo / Přerušeno / Selhalo (completion banner)** — po dokončení runu se objeví nahoře v pravém sloupci. Klik na **Potvrdit** banner skryje a vrátí UI do připraveného stavu.
+- **Hotovo / Přerušeno / Selhalo (completion banner)** — po dokončení runu se objeví nahoře v pravém sloupci. Klik na **Potvrdit** banner skryje a vrátí UI do připraveného stavu. Po **úspěšném** runu je banner také **drag source** — přetáhni ho do Finderu / Slacku → output folder se předá. Mimo app pak app pošle **Notification Center banner** s tlačítkem „Otevřít výstup".
+- **Předchozí běh** v idle Průběh — po dokončeném runu zobrazí `⌀ X s/dok · Vstup: N · Odhad: ≈ T` (před spuštěním dalšího runu).
+- **Live throughput** v aktivní Průběh — `12,3 dok/min · ⌀ 4,8 s/dok` vedle ETA — užitečné pro detekci zpomalení (KV cache, swap).
+- **Currently processing** — pod ETA: `Probíhá: doc1.pdf, doc2.pdf (+1)` + `Naposledy: doc3.pdf`.
+- **Filtr logu (Cmd+F)** — case-insensitive substring filter, zobrazí jen řádky obsahující text. **Kopírovat** zkopíruje aktuálně viditelné řádky.
+- **Severity coloring v logu** — `[ERROR]` red, `[WARNING]` orange, `[INFO]` muted. Pro rychlý sken dlouhého logu.
 - **Obnovit (log)** — načte aktuální tail `processing.log` z disku. Užitečné při dlouhém runu, kdy chceš nahlédnout na živý log dřív, než skončí aktuální fáze.
+- **Drag handles** ve VSplitView — drobné pily (32×3 pt) na spodní hraně Promptu a Průběhu signalizují tažitelný separator.
+
+### Conflict bannery (rozpor mezi configem a promptem)
+- **Žluté** (`Doporučený režim: …`) — analyzer detekoval z promptu jiný režim než vybraný; klik na akční tlačítko nabídne přepnutí (s confirm dialogem proti false-positivu).
+- **Oranžové** (`SEARCH bez embedding modelu`) — RAG nebude fungovat; klik nabídne přepnutí na FAST.
+- **Modré** (`CONSOLIDATE zpracuje batch společně`) — informativní; tlačítko **Skrýt** ukončí banner do konce session.
+- Bannery jsou **debounced 400 ms** — neblikají při psaní v editoru.
 
 ### V Předvolbách (Cmd+,)
 - **Vyčistit cache** (tab Cache, červené `role: .destructive`) — smaže **obě** cache (per-dokument + per-inference odpovědi).

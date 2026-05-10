@@ -31,6 +31,21 @@ Jediný zdroj pravdy pro pojmenování v GUI, nápovědě (HelpSheet) a uživate
 | Výsledek běhu (banner + finished card) | **Hotovo** / **Přerušeno** / **Selhalo** | `SHRunCompletion.success/cancelled/failed` | Stejné termíny v banneru i v progress kartě po dokončení. |
 | Karta logu | **Log** | — | Ne „Detailní log" (pleonasmus). |
 | Požadavek na server | **požadavek** | `request` | V UI/helpu i tooltipech vždy česky. |
+| Karta serveru | **Server** | — | Po split na 2 karty (dříve „Server a model"). Hostuje pouze server registry + connection details. |
+| Karta modelů | **Modely a režim** | — | 4 model pickery (Embedding/Reranker hidden v non-SEARCH) + segmented Režim. |
+| Onboarding strip | **Začni tady** | — | Klikatelné chips, fokus skočí na první actionable kontrolu sekce. |
+| Multi-window primary | **hlavní okno** / **primary** | `WindowGroup(id: "main")` | UserDefaults persistence on. |
+| Multi-window secondary | **scratch okno** / **nové okno** | `WindowGroup(id: "scratch", for: UUID.self)` | UserDefaults persistence off; per-session. |
+| Save/Load Project | **Otevřít projekt…** / **Uložit projekt jako…** | `openProject`, `saveProjectAs` | `.spiceharvester.json` JSON snapshot. Cmd+O / Cmd+Shift+S. |
+| Project file | **projekt** | `SHProjectSnapshot` | Codable struct s folder + model + prompt + mode. Server registry NOT included (globální). |
+| Naposledy použité složky | **Naposledy** (submenu) | `recentFolders[SHFolderKind]` | Per-kind 5 entries v UserDefaults. |
+| Prompt history | **Historie** (Menu) | `promptHistory` | 8 nejnovějších prompts ze Spustit. |
+| Notification akce | **Otevřít výstup** | `OPEN_OUTPUT` (UNNotificationAction) | Klik na akci na Notification Center banneru. |
+| Server health | **Server odpojen** (status pill červená) | `isVerifiedServerReachable` | Detekováno 30 s ambient ping loop. |
+| Sub-second průměr | **ø X ms** | `humanDurationDetailed` | Pro cache-only baselines pod 1 s. |
+| Live throughput | **N dok/min · ⌀ T s/dok** | — | V Progress kartě vedle ETA při běhu. |
+| Drag handle | drobná pila uprostřed VSplitView dělítka | `dragHandleGrip` | Vizuální affordance "tažitelný separator". |
+| Tab cyklus | **Tab** / **Shift+Tab** mezi aktivními tlačítky | NSEvent monitor + `@FocusState` | Vlastní implementace, nezávislá na sys Keyboard Navigation. |
 
 ## Kontrola konzistence
 

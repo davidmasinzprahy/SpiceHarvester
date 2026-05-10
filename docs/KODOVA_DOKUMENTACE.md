@@ -276,29 +276,66 @@ XLSX rozhraní `SHXLSXExporting` (`SHXLSXExportPlaceholder`) — nerealizováno;
 
 ## 13. UI a ViewModel
 
-### `SpiceHarvesterApp` (App scene)
-Hostuje `@State vm = SHAppViewModel()` na úrovni App, takže ho sdílí hlavní okno i `Settings` scéna. Definuje:
-- `WindowGroup { ContentView(vm:, showHelp:) }` — `defaultSize 1180×980`, fyzická velikost se po startu adaptuje přes `SHAppDelegate` na `NSScreen.visibleFrame`.
-- `.commands { CommandGroup(replacing: .newItem) { … }; CommandGroup(replacing: .help) { … } }` — registruje shortcuty Cmd+R / Cmd+. / Cmd+Shift+P / Cmd+Shift+E / Cmd+Shift+O / Cmd+?, navázané přímo na `vm` (`canRunAll`, `canRunPreprocessing`, …).
-- `Settings { SettingsView(vm:) }` — nativní macOS Settings okno otevíratelné Cmd+, přes Spice Harvester → Settings… z menu.
+### `SpiceHarvesterApp` (App scene) — multi-scene struktura
 
-### `ContentView` (dvousloupcový layout)
-- **Window toolbar** (`.toolbar { ToolbarItem(.navigation) { statusIndicator }; ToolbarItemGroup(.primaryAction) { runOrStop / Output / Help } }`) — single source of truth pro Run/Stop. Stav (zelená tečka „Připraveno" / spinner „Zpracovávám…") sedí vlevo, akce vpravo. `Přerušit` má `role: .destructive`.
-- **Hlavní layout** = `HSplitView`:
-  - **Levý sloupec (konfigurace)** ve vlastním `ScrollView`:
-    - `header` (logo + název + subtitle, **bez** progress pillu i help buttonu — obojí je v toolbaru)
-    - `foldersCard` — 4× read-only folder row s `Text` v rounded boxu, **drag-and-drop** přes `.dropDestination(for: URL.self)` (akceptuje pouze adresáře), tlačítko „Vybrat" / „Změnit" otevírá `NSOpenPanel`
-    - `serverCard` — picker + add/remove + MLX preset + Ověřit + 4 model pickery v `Grid(2×2)` (Inference / Embedding / Reranker / OCR-VLM) + segmented `Režim extrakce` + caption s popisem aktivního režimu (`modeHintText`)
-    - `promptsCard` — Načíst + picker `.md` + nothink/think tlačítka + Vymazat + `TextEditor` + parameter conflict bannery
-  - **Pravý sloupec (runtime)** **bez** outer `ScrollView`:
-    - `completionBanner` (jen pokud `vm.lastCompletion != nil`, „Hotovo / Přerušeno / Selhalo" + Potvrdit)
-    - `progressStatusCard` (tři stavy idle / předzpracování-extrakce / finished, `TimelineView(.periodic)` pro live ETA + health row)
-    - `logCard` (`frame(maxHeight: .infinity)`, ScrollViewReader auto-scroll, `Obnovit` button — `vm.logText` se z disku obnovuje až mezi fázemi)
-- **Status bar** (dolní lišta plné šířky) — `vm.statusText` v `.caption`, kruhový indikátor 10 pt.
+Aplikace registruje **4 Scene**:
+- `WindowGroup(id: "main")` — primary okno s `vm = SHAppViewModel()` (`.persistent` mode, default), `showHelp` flag, `@State` na App scope. `.focusedSceneValue(\.showHelpBinding, $showHelp)` propaguje binding pro Cmd+? routing.
+- `Settings { SettingsView(vm:) }` — nativní Cmd+, sheet, sdílí primary's `vm` (Settings je vždy globální per-app).
+- `WindowGroup(id: "scratch", for: UUID.self) { _ in SHScratchRoot() }` — scratch okna otevíraná `openWindow(id: "scratch", value: UUID())` z menu Cmd+Shift+N. Každé má vlastní view-model (`.scratch` mode), vlastní `showHelp`, vlastní `.focusedSceneValue`.
+- `defaultSize(width: 1180, height: 980)` na obou WindowGroup.
 
-**Co se z hlavního okna přesunulo do Settings (Cmd+,):** OCR backend, výkonové steppery (souběžnost, throttle, kontext modelu), timeout požadavku, `bypassInferenceCache` toggle, `Vyčistit cache` (s `role: .destructive`).
+`SHAppDelegate` (`NSApplicationDelegateAdaptor`):
+- `applicationDidFinishLaunching`: nastaví `UNUserNotificationCenter.delegate = self`, registruje completion notification category s "Otevřít výstup" akcí, volá `requestAuthorization`. Frame autosave přes `setFrameAutosaveName("SpiceHarvesterMainWindow")` — manuální resize/move se persistuje, první launch padne na `resizeMainWindowForCurrentScreen()` (visibleFrame logika).
+- `UNUserNotificationCenterDelegate`: `willPresent` vrací `[.banner, .sound]` (banner i pro foreground), `didReceive` mapuje `OPEN_OUTPUT` action na `SHIntentNotifications.openOutput` post.
+- `handleOpenProjectOutcome(_:)` static helper renderuje alert pro `successNeedsRepick` / `failed` cases.
 
-Monochromatický design: primary color pro dekoraci, **zelená** rezervovaná jen pro „verified / selected / done" stavy. Modrá pro aktivní akční tlačítka, disabled (šedá) pro nesplněné prerekvizity. `GlassCard` má `.regularMaterial` + 0.5 pt stroke; **drop shadow byl odstraněn** (5+ stínovaných karet na window-sized gradientu šuměly bez přidaných informací).
+`.commands` registruje 4 skupiny:
+1. `CommandGroup(replacing: .newItem)` — Spustit (Cmd+R) / Přerušit (Cmd+.) / Předzpracování (Cmd+Shift+P) / Extrakce (Cmd+Shift+E) / Otevřít výstup (Cmd+Shift+O)
+2. `CommandGroup(after: .saveItem)` — Uložit projekt jako… (Cmd+Shift+S) / Otevřít projekt… (Cmd+O) / Nové okno (Cmd+Shift+N)
+3. `CommandGroup(after: .toolbar)` — Režim FAST / SEARCH / CONSOLIDATE (Cmd+1 / Cmd+2 / Cmd+3)
+4. `CommandGroup(replacing: .help)` — Nápověda (Cmd+?), čte `@FocusedValue(\.showHelpBinding)` a fallbackne na primary's binding
+
+Plus `installTabKeyMonitor()` v ContentView's `.onAppear` registruje `NSEvent.addLocalMonitorForEvents(matching: .keyDown)`:
+- **Tab/Shift+Tab** (keyCode 48 bez Cmd/Ctrl/Option) → `advanceFocus(reverse:)` přes `enabledFocusOrder` (filter podle `canX` predikátů)
+- **Cmd+F** (keyCode 3) → `focus = .logFilter`
+- **Esc** (keyCode 53) → uvolní text input + `focus = .run`
+
+### `ContentView` — dvousloupcový layout
+
+**Levý sloupec (configuration + ovládání)**, min 460 pt / ideal 540 pt:
+1. `header` — logo + název + subtitle
+2. `leftConfigurationCards`:
+   - `onboardingCard` (jen pokud !`vm.isSetupComplete`) — klikatelné chips
+   - `foldersCard` — 4× folder row s `kind: SHFolderKind` parametrem; po prvním picknutí se Vybrat promění na Menu s "Naposledy" submenu (5 entries per kind). PDF chip pod Vstup.
+   - `serverCard` — registry picker + add/remove + MLX preset + Ověřit + 3 textfieldy (name, URL s ⚠️ inline validací, API key)
+   - `modelsCard` — Inference + OCR/VLM (vždy), Embedding + Reranker (jen v SEARCH), segmented Mode picker, mode hint caption
+   - `Spacer(minLength: 0)` push
+3. `Divider().opacity(0.4)`
+4. `runRow` — Status pill + Spustit/Přerušit + Výstup + Nápověda (přes `ViewThatFits` adaptive labels)
+
+**Pravý sloupec (workspace + monitoring)**, min 480 pt:
+1. `notificationStack` — completion banner + conflict banners (oba `.accessibilityElement(children: .combine)`)
+2. **VSplitView** (nebo plný `promptsCard` při `promptFullscreen`):
+   - `promptsCard` (minHeight 170, ideal 290) + `dragHandleGrip` na bottom edge
+   - `progressStatusCard` (minHeight 80, ideal 120) + `dragHandleGrip` na bottom edge
+   - `logCard` (minHeight 150, ideal 250)
+
+`logCard` používá `SHLogTextView` (NSViewRepresentable wrapping NSTextView) s severity coloring (`[ERROR]` red, `[WARNING]` orange, `[INFO]` muted) a smart auto-scroll (`userPinnedToBottom` heuristika).
+
+**Status bar** (dolní lišta plné šířky) — `vm.statusText`, `.textSelection(.enabled)`. **Auto-collapse** když `vm.isStatusIdle` (text == idleStatus konstanta).
+
+`.animation(.easeOut(duration: 0.20), value: statusBarShouldShow)` + `.animation(.easeInOut(duration: 0.12), value: focus)` na body root pro animované transitions (statusBar slide, VisibleFocusRing fade).
+
+**Co je v Settings (Cmd+,):** OCR backend, výkonové steppery, timeout požadavku, `bypassInferenceCache`, `Vyčistit cache` (`role: .destructive`). + search field na top.
+
+Monochromatický design: primary color pro dekoraci, **zelená** pro verified/selected/done, **modrá** pro primary CTA + akce, **červená** pro destructive (Přerušit, Vymazat, server odpojen). `GlassCard` má `.regularMaterial` + 0.5 pt stroke.
+
+### `VisibleFocusRing` ViewModifier
+
+Default macOS focus ring proti `.regularMaterial` v Light mode neviditelný. Custom modifier:
+- 2 pt accent stroke 60 % opacity, RoundedRectangle(cornerRadius: 6) overlay
+- `.padding(-2)`, `.allowsHitTesting(false)`
+- Aplikováno na: Run, Cancel, Output, Help, Verify, Načíst
 
 ### `SettingsView` (nativní macOS Settings scene)
 Settings je nativní `Settings { SettingsView(vm:) }` scéna, ale obsah nepoužívá systémový `TabView` tab strip. Kvůli chybě macOS renderování vybraného tab itemu ve světlém režimu má vlastní horní přepínač (`SettingsTab`) s explicitním `.primary` / `.secondary` textem. Okno má pevný frame **620×540 pt**, aby se vešel celý obsah bez useknutí spodních sekcí.
@@ -321,31 +358,75 @@ Sdílený materiálový kontejner. `.regularMaterial` + `RoundedRectangle(corner
 ### `SHAppViewModel`
 Centrální orchestrátor (`@MainActor @Observable`).
 
-Hlavní operace:
-- `verifyServer()` — ping + `/v1/models` + `/api/v0/models` (LM Studio context auto-detect)
-- `reloadPromptFiles()`, `loadPromptFile(_:)`, `clearPrompt()`
-- `runPreprocessing()`, `runExtraction()`, `runAll()` — každá přes `executeRun { ... }` single-entry guard
-- `cancelRun()` — propaguje `CancellationError` do pipeline
-- `acknowledgeCompletion()` — skryje completion badge
-- `clearCache()` — nuke per-dokument i per-inference cache
-- `refreshLog()`, `openOutput()`
+#### `PersistenceMode`
+```swift
+enum PersistenceMode { case persistent, scratch }
+```
+- **`.persistent`** (default, primary window): UserDefaults read+write přes `configStore`. Persistuje config + bookmarks + prompt history + recent folders.
+- **`.scratch`** (Cmd+Shift+N windows): UserDefaults read-only pro shared assets (server registry, prompt history at init). `configStore.save` skipuje, `recordPromptInHistory` + `rememberRecentFolder` write skipují (in-memory list updateuje, persist no-op).
 
-`runXxx` metody interně volají `performXxx()` které vrací **typed `SHRunOutcome`** enum (`.success / .cancelled / .failed / .notStarted`). `executeRun` klasifikuje outcome z return value (dřív z `statusText.lowercased()` — fragile heuristika, teď odstraněna).
+Init: `init(persistenceMode: PersistenceMode = .persistent)`.
 
-`.notStarted` (preconditions failed) **nezobrazí** completion badge — UI zůstává v ready stavu.
+#### Hlavní operace
+- `verifyServer()` — ping + `/v1/models` + LM Studio's `/api/v0/models` auto-context. Po success **startServerHealthWatcher()** spustí 30 s ping loop.
+- `runPreprocessing() / runExtraction() / runAll()` — single-entry guard přes `runEntered` flag, vše orchestruje `executeRun(_ work:)`.
+- `cancelRun()` — propaguje `CancellationError` do pipeline.
+- `clearCache()`, `refreshLog()`, `openOutput()`, `acknowledgeCompletion()`.
+- `saveProjectAs() / openProject()` — Save/Open Project commands.
 
-Parameter conflicts (`parameterConflicts: [SHParameterConflict]`) se recomputují na změnu promptu / configu.
+#### `runXxx` chování
+- Vrací **typed `SHRunOutcome`** (`.success / .cancelled / .failed / .notStarted`). `executeRun` klasifikuje z return value.
+- `.notStarted` nezobrazí completion badge.
+- Po `.success / .cancelled / .failed` (a `!NSApp.isActive`) volá `postCompletionNotification(for:)` — Notification Center banner s "Otevřít výstup" akcí (categoryIdentifier `SHCompletionNotification.categoryID`).
 
-Výkonové odhady:
-- `pendingDocumentCount`
-- `estimatedPerDocumentMs`
-- `estimatedRunDurationMs`
+#### Conflict detection (debounced)
+- `parameterConflicts: [SHParameterConflict]` computed property (analyzer keyword match na promptu).
+- `displayedConflicts: [SHParameterConflict]` debounced mirror — view čte tento.
+- `scheduleConflictUpdate(after delayMs: Int = 400)` cancelluje pending task a registruje nový. Filtruje `dismissedConflictIDs` před assignment.
+- `dismissConflict(_:)` přidá `dismissID` do `dismissedConflictIDs` (per-session set, reset v `openProject`).
 
-Důležité chování:
+#### Server health watcher
+```swift
+private var serverHealthTask: Task<Void, Never>?
+var isVerifiedServerReachable: Bool = true
+```
+- 30 s `Task.sleep` smyčka, po každém pinguje `lmClient.fetchModels(server)`.
+- Failure flippe `isVerifiedServerReachable = false` → `statusIndicator` pill zčervená.
+- `stopServerHealthWatcher()` v `invalidateServerVerification()` (URL/server change).
+
+#### Input folder stats (async)
+- `inputFolderPdfCount: Int?`, `inputFolderPdfBytes: Int64?`, `inputFolderChipLabel: String?`
+- `refreshInputFolderStats()` cancelluje předchozí `inputFolderScanTask` a startuje nový `Task.detached(priority: .userInitiated)`. Hold scoped access uvnitř task, MainActor.run zpět pro update.
+
+#### Granular progress
+- `progressState.currentlyProcessing: [String]` (max 6 inflight)
+- `progressState.lastFinishedItem: String?`
+- `itemStarted(_:)` / `itemFinished(_:)` callbacks z pipeline `onItemEvent`.
+
+#### Prompt history + Recent folders
+- `promptHistory: [String]` (max `promptHistoryLimit = 8`), `recordPromptInHistory()` push při Run start.
+- `recentFolders: [SHFolderKind: [String]]` (max `recentFoldersLimit = 5` per kind), `rememberRecentFolder(_:kind:)` push při folder pick.
+- Oba persisten do UserDefaults v `.persistent` mode (write přes `Task.detached(priority: .utility)` off-main).
+
+#### Save/Open Project
+- `SHProjectSnapshot: Codable, Sendable` (top-level v Models layer) — folders + model picks + extractionMode + prompt + lastLoadedPromptName + schemaVersion.
+- `saveProjectAs() -> URL?` — NSSavePanel, JSON encode, atomic write.
+- `openProject() -> SHOpenProjectOutcome` — NSOpenPanel, sniff `schemaVersion` před decode (friendly error pro non-project JSON), `staleSandboxPaths(in:)` detekce + `successNeedsRepick` outcome.
+- Reset state: `lastCompletion = nil`, `progressState = .init()`, `cachedDocuments.removeAll()`, `dismissedConflictIDs.removeAll()`.
+
+#### AppIntents bridge
+Observers pro `SHIntentNotifications.runAll` / `.openOutput` registrovány **pouze v `.persistent` vm** — bez gate by každé scratch okno reagovalo paralelně:
+```swift
+if #available(macOS 13.0, *), persistenceMode == .persistent {
+    NotificationCenter.default.addObserver(...)
+}
+```
+
+#### Důležité chování
 - `runExtraction()` automaticky spustí předzpracování, pokud ještě nejsou data v paměti
 - Změna input folderu (přes picker i onChange) invaliduje `cachedDocuments`
-- `lastPickedFolderParent` session-only state — další folder picker otevře rodiče minulého výběru (sourozenecké složky na 1 klik)
-- `persistAllDebounced()` (300ms) pro keystroke-driven bindings (URL, API key, prompt text), flush na `willTerminateNotification`
+- `lastPickedFolderParent` session-only state — další folder picker otevře rodiče minulého výběru
+- `persistAllDebounced()` (300 ms) pro keystroke-driven bindings (URL, API key, prompt text), flush na `willTerminateNotification`. V `.scratch` mode no-op.
 
 ## 14. Aktivní struktura projektu
 
@@ -361,22 +442,24 @@ SpiceHarvester/
   Views/
     GlassCard.swift       — sdílený materiálový kontejner
     HelpSheet.swift       — nápověda (Cmd+?)
-    SettingsView.swift    — Settings scéna (Cmd+,) s taby Výkon/OCR/Cache
+    SettingsView.swift    — Settings scéna (Cmd+,) s taby Výkon/OCR/Cache + search
+    SHLogTextView.swift   — NSViewRepresentable wrapping NSTextView (severity coloring)
   Services/
     SHBenchmarkService.swift
     SHConfigStore.swift
+    SHEmbeddingCache.swift
     SHFileScanService.swift
     SHOpenAICompatibleClient.swift
     SHOCRProvider.swift
     SHPDFParser.swift
-    SHPromptAnalyzer.swift
+    SHPromptAnalyzer.swift           — + dismissID, isDismissible
     SHPromptLibraryService.swift
     SHResultSchemaValidator.swift
     SHServerRegistryStore.swift
     SHTextCleaningService.swift
   Pipeline/
-    SHExtractionPipeline.swift
-    SHPreprocessingPipeline.swift
+    SHExtractionPipeline.swift       — + onItemEvent callback (FAST/SEARCH path)
+    SHPreprocessingPipeline.swift    — + onItemEvent callback
     SHQueueManager.swift
   Cache/
     SHCacheManager.swift
@@ -385,8 +468,15 @@ SpiceHarvester/
     SHProcessingLogger.swift
   Export/
     SHExportService.swift
+  AppIntents/
+    SHAppIntents.swift               — RunSpiceHarvesterIntent, OpenOutputFolderIntent, AppShortcutsProvider
+  QuickLook/
+    SHQuickLookPreview.swift         — provider source za #if QUICK_LOOK_EXTENSION (target chybí)
+  Localizable.xcstrings              — CS source + EN translations
   ContentView.swift
-  SpiceHarvesterApp.swift
+  SpiceHarvesterApp.swift            — multi-scene: WindowGroup main + scratch + Settings, SHAppDelegate
+  SpiceHarvester.entitlements        — Release: sandbox + user-selected files + network
+  SpiceHarvesterDebug.entitlements   — Debug: + cs.* dev exceptions
 ```
 
 Legacy soubory (archivováno):

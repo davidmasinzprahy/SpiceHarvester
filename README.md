@@ -31,17 +31,49 @@ Výchozí režim je **FAST** (bez embeddingů).
 
 ## Klíčové funkce
 
+### Pipeline a extrakce
 - SwiftUI + MVVM + async/await, `@Observable`
 - URLSession s retry na transient chyby (502/503/504, timeout, connection lost) a cooperative cancellation
 - PDFKit + Vision OCR fallback, thread-safe rendering, autoreleasepool na stránku
 - Tři režimy extrakce: **FAST** / **SEARCH** (RAG s embeddingy a volitelným rerankerem) / **CONSOLIDATE** (s map-reduce fallbackem)
 - Dvoustupňová cache (per-dokument + per-inference) — instant hit při ladění promptu
 - Pre-flight token budget check + auto-detekce context length z LM Studio API
-- Parameter conflict detection v promptu s jednoklikovým přepnutím režimu
-- Security-scoped bookmarks pro persistentní přístup ke složkám napříč restarty
-- Konfigurovatelná concurrency, throttle, context budget
+- Parameter conflict detection v promptu s jednoklikovým přepnutím režimu (debounced 400 ms)
 - Typed `SHRunOutcome` (success / cancelled / failed / notStarted) + persistentní completion badge v UI
 - Export: JSON (canonical), TXT, CSV (UTF-8 BOM pro Excel), per-dokument `*_raw.json` / `*_raw.csv` / `*_raw.txt`, agregátní `raw_responses.json`
+
+### UX a produktivita
+- **Multi-window**: primary + scratch okna (Cmd+Shift+N) s nezávislým view-modelem; scratch okna nepersistují konfiguraci do UserDefaults
+- **Save / Open Project** — `.spiceharvester.json` snapshot folderů, modelů, promptu a režimu (Cmd+Shift+S / Cmd+O)
+- **Tab / Shift+Tab navigace** mezi aktivními tlačítky (vlastní `NSEvent` monitor, nezávislý na systémovém Keyboard Navigation)
+- **Cmd+1 / Cmd+2 / Cmd+3** přepínání režimu FAST / SEARCH / CONSOLIDATE
+- **Cmd+Z undo** pro Vymazat prompt přes `NSUndoManager`
+- **Cmd+F** fokusuje filtr logu (case-insensitive substring)
+- **Esc** uvolní textový vstup, fokus skočí na Spustit
+- **Recent folders menu** vedle Vybrat (5 nejnovějších cest per slot)
+- **Prompt history** (max 8) — automaticky zaznamenané prompty z úspěšných runů
+- **Prompt fullscreen toggle** — dočasné rozšíření editoru přes pravý sloupec
+- **Drag-out** výstupní složky z tlačítka Výstup nebo completion banneru → Finder / Slack / Mail
+- **Onboarding strip** s klikatelnými kroky (Vstup / Výstup / Server / Prompt) — focusuje příslušnou kontrolu
+
+### Stav a zpětná vazba
+- **Live throughput** v Progress kartě (`12,3 dok/min · ⌀ 4,8 s/dok`)
+- **Granulární progress** — viditelná aktuálně zpracovávaná položka + naposledy dokončená
+- **Health watcher** — 30 s ambient ping na `/v1/models` po Ověřit; status pill zčervená při disconnectu
+- **Server URL inline validace** — ⚠️ ikona u malformed Base URL bez čekání na Ověřit
+- **Notification Center** na completion (success/cancelled/failed) s akcí "Otevřít výstup"
+- **AppIntents** pro Shortcuts.app + Spotlight + Siri (`Spusť SpiceHarvester`, `Otevři výstup SpiceHarvester`)
+- **Window position persistence** — manuální resize/move přežívá restart
+- **Status bar** auto-collapse když není runtime status
+- **VSplitView** s tažitelnými dělítky mezi Prompt / Průběh / Log
+
+### Sandbox a integrace
+- Security-scoped bookmarks pro persistentní přístup ke složkám napříč restarty
+- Konfigurovatelná concurrency, throttle, context budget
+- Lokalizace přes String Catalog (CS source + EN ready, fallback na CS)
+- Settings search (Cmd+,) — fulltextový skok na příslušný tab
+- Dynamic Type clamp `.medium…accessibility3`
+- Reduce Motion / VoiceOver composite elements (banners) / focus ring overlay
 
 ## Rychlý start
 
@@ -101,8 +133,16 @@ Pipeline se nejdřív pokusí dekódovat odpověď proti vestavěnému kanonick�
 | Předzpracování | `Cmd+Shift+P` |
 | Extrakce | `Cmd+Shift+E` |
 | Otevřít výstup ve Finderu | `Cmd+Shift+O` |
+| **Otevřít projekt…** | `Cmd+O` |
+| **Uložit projekt jako…** | `Cmd+Shift+S` |
+| **Nové okno (scratch)** | `Cmd+Shift+N` |
+| **Režim FAST / SEARCH / CONSOLIDATE** | `Cmd+1` / `Cmd+2` / `Cmd+3` |
+| **Fokus filtru logu** | `Cmd+F` |
+| **Zpět (po Vymazat prompt)** | `Cmd+Z` |
 | Předvolby (výkon, OCR, cache) | `Cmd+,` |
 | Nápověda | `Cmd+?` |
+
+**Tab navigace** přes hlavní tlačítka funguje i bez systémového zapnutí *Keyboard Navigation* — aplikace má vlastní `NSEvent` monitor, který Tab/Shift+Tab cykluje pouze přes aktivní (neszedisabledované) tlačítka. **Esc** uvolní textové pole a skočí na Spustit.
 
 ## Výkon a cache
 
@@ -142,20 +182,34 @@ Steppery v **Předvolbách → Výkon** (`Cmd+,`):
 
 ## Persistence
 
+### Persistent (primary) window
 - **Při startu se záměrně resetují** provozní vstupy: složky, security-scoped bookmarky, vybrané modely, text promptu. `modelContextTokens` si drží hodnotu z `Ověřit server` z minulé session.
-- **Persistují se**: registry lokálních AI serverů, režim extrakce, concurrency + throttle + kontext, `bypassInferenceCache`, průměry z posledního runu (`lastRunAvg*Ms` — pro odhady v Benchmark kartě).
+- **Persistují se**: registry lokálních AI serverů, režim extrakce, concurrency + throttle + kontext, `bypassInferenceCache`, průměry z posledního runu (`lastRunAvg*Ms` — pro odhady v Benchmark kartě), prompt history (max 8), recent folders per slot (max 5).
 - **Flush při ukončení aplikace**: pending debounced `persistAllDebounced()` se při `NSApplication.willTerminateNotification` prokopne okamžitým `persistAll()`, takže force-quit během editace promptu neztratí data.
+
+### Scratch (secondary) window — Cmd+Shift+N
+- View-model je inicializován s `PersistenceMode.scratch`.
+- **`configStore.save` skipuje** — scratch okno nepřepíše primary's UserDefaults config slot.
+- **Server registry sdílen** přes `serverStore.saveServers` — server přidaný ve scratch je dostupný i v primary.
+- **Prompt history a Recent folders** zůstávají per-session (in-memory list updateuje, write skip).
+- Pro persistování scratch konfigu uživatel použije **Uložit projekt jako…** (Cmd+Shift+S).
+
+### Project files (`.spiceharvester.json`)
+- `SHProjectSnapshot` Codable struct — folders, model picks, mode, prompt, lastLoadedPromptName.
+- **Vyloučeno**: server registry (sdíleno globálně), runtime state, performance prefs.
+- Open Project detekuje cesty bez stored security-scoped bookmarku a vyzve k re-pick (sandbox není možné obejít).
 
 ## Dokumentace
 
 | Dokument | Obsah |
 |---|---|
-| [Uživatelská nápověda](docs/NAPOVEDA_UZIVATEL.md) | UI, klávesové zkratky, OCR, řešení problémů |
-| [Technická dokumentace](docs/KODOVA_DOKUMENTACE.md) | Architektura, pipeline, persistence, cache |
-| [UI design](docs/UI_DESIGN.md) | Komponenty, ikony, layout |
+| [Uživatelská nápověda](docs/NAPOVEDA_UZIVATEL.md) | UI, klávesové zkratky, multi-window, projekty, OCR, řešení problémů |
+| [Technická dokumentace](docs/KODOVA_DOKUMENTACE.md) | Architektura, pipeline, persistence, cache, AppIntents, multi-window |
+| [UI design](docs/UI_DESIGN.md) | Komponenty, ikony, layout, focus ring, drag handles |
 | [Architektura (PlantUML)](docs/ARCHITEKTURA_PLANTUML.md) | Diagramy |
 | [Práce s prompty](docs/PROMPT_TXT_NAVOD.md) | Šablony a CSV/TXT konvence |
 | [Terminologie](docs/TERMINOLOGIE.md) | Kanonické pojmy v UI/dokumentaci |
+| [P2 backlog](docs/P2_BACKLOG_DEFERRED.md) | Quick Look extension, iCloud Drive, plný DocumentGroup — implementační poznámky |
 | [Legacy mapa](Legacy/README.md) | Stará implementace |
 
 ## Vývoj
@@ -164,26 +218,39 @@ Steppery v **Předvolbách → Výkon** (`Cmd+,`):
 
 ```text
 SpiceHarvester/
-├─ Models/
+├─ Models/                 # Codable structs (SHAppConfig, SHExtractionResult, SHProgressViewState)
 ├─ ViewModels/
+│  └─ SHAppViewModel.swift # @Observable @MainActor — config, runtime, persistence
 ├─ Views/
-│  ├─ GlassCard.swift
-│  ├─ HelpSheet.swift
-│  └─ SettingsView.swift
-├─ Services/
-├─ Pipeline/
-├─ Cache/
-├─ Logging/
-├─ Export/
-├─ ContentView.swift
-└─ SpiceHarvesterApp.swift
+│  ├─ GlassCard.swift      # Compact Glass card wrapper
+│  ├─ HelpSheet.swift      # Modal help sheet
+│  ├─ SettingsView.swift   # Cmd+, sheet (Výkon / OCR / Cache, search field)
+│  └─ SHLogTextView.swift  # NSViewRepresentable wrapping NSTextView (severity colored)
+├─ Services/               # SHPromptAnalyzer, SHFileScanService, SHTextCleaningService, …
+├─ Pipeline/               # SHPreprocessingPipeline, SHExtractionPipeline (FAST/SEARCH/CONSOLIDATE)
+├─ Cache/                  # SHCacheManager (per-doc), SHInferenceCache (per-call)
+├─ Logging/                # SHProcessingLogger
+├─ Export/                 # SHExportService (JSON/CSV/TXT)
+├─ AppIntents/
+│  └─ SHAppIntents.swift   # RunSpiceHarvesterIntent, OpenOutputFolderIntent, AppShortcutsProvider
+├─ QuickLook/
+│  └─ SHQuickLookPreview.swift  # Provider source za #if QUICK_LOOK_EXTENSION (target chybí, viz P2 backlog)
+├─ Localizable.xcstrings   # CS source + EN překlady
+├─ ContentView.swift       # HSplitView root, runRow, focus management
+└─ SpiceHarvesterApp.swift # Scenes: WindowGroup primary + scratch + Settings; SHAppDelegate
 ```
 
 Legacy implementace je archivována ve složce `Legacy/`.
 
-### Okno
+### Okno a layout
 
-Okno se při startu přizpůsobuje aktuálnímu monitoru: výška používá celé dostupné `visibleFrame` macOS, aby se na velkém displeji nezobrazil úvodní scrollbar; šířka je na velkém monitoru omezena na pracovní šířku UI. Hlavní okno je dvousloupcové (`HSplitView`) — vlevo konfigurace, vpravo karta Průběh + Log; rozdělovač lze tahat.
+Okno se při startu přizpůsobuje aktuálnímu monitoru: výška používá celé dostupné `visibleFrame` macOS, aby se na velkém displeji nezobrazil úvodní scrollbar; šířka je na velkém monitoru omezena na pracovní šířku UI. **Window position se persistuje** přes `setFrameAutosaveName` — manuální resize/move přežívá restart.
+
+Hlavní okno je dvousloupcové (`HSplitView`):
+- **Vlevo (konfigurace + ovládání):** Onboarding strip → Složky → Server → Modely a režim → divider → Run row (status pill + Spustit/Výstup/Nápověda)
+- **Vpravo (workspace + monitoring):** Notifikace → `VSplitView` { Prompt → Průběh → Log } s tažitelnými dělítky a viditelnými drag-handle pily
+
+Sekundární scratch okna (Cmd+Shift+N) sdílejí stejný layout, ale s vlastním view-modelem.
 
 ### Build a signing
 
