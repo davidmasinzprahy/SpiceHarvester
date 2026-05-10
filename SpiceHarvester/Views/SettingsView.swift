@@ -7,6 +7,11 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var vm: SHAppViewModel
     @State private var selectedTab: SettingsTab = .performance
+    /// Substring search across all tabs. Each tab declares its own
+    /// keyword bag (`SettingsTab.searchKeywords`); typing here auto-selects
+    /// the first matching tab so the user lands on relevant content
+    /// without remembering which tab hosts which knob ("kde je throttle?").
+    @State private var searchText: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,19 +20,47 @@ struct SettingsView: View {
                 .foregroundStyle(.primary)
                 .padding(.top, 12)
 
+            // Settings search: bridges the "split between main window and
+            // Cmd+, sheet" friction that the audit flagged. The user types
+            // a fragment of any setting name and we jump to the right tab.
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Hledat v nastavení…", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(maxWidth: 280)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(.top, 6)
+            .onChange(of: searchText) { _, newValue in
+                if let match = SettingsTab.firstMatching(query: newValue) {
+                    selectedTab = match
+                }
+            }
+
             HStack(spacing: 18) {
                 ForEach(SettingsTab.allCases) { tab in
                     settingsTabButton(tab)
                 }
             }
-            .padding(.top, 12)
+            .padding(.top, 8)
             .padding(.bottom, 12)
 
             Divider()
 
             selectedTabContent
         }
-        .frame(width: 620, height: 540)
+        .frame(width: 620, height: 580)
     }
 
     @ViewBuilder
@@ -248,5 +281,42 @@ private enum SettingsTab: CaseIterable, Identifiable {
         case .ocr: "doc.text.viewfinder"
         case .cache: "externaldrive"
         }
+    }
+
+    /// Substring keywords associated with each tab — searched as a flat
+    /// concatenation. Adding a new setting? Append the user-visible
+    /// fragments here so the search field finds it.
+    var searchKeywords: [String] {
+        switch self {
+        case .performance:
+            return [
+                "výkon", "throttle", "souběžné", "concurrent", "inference",
+                "pdf", "ocr workers", "kontext", "context", "tokenů",
+                "timeout", "http", "model"
+            ]
+        case .ocr:
+            return [
+                "ocr", "vision", "vlm", "apple", "backend", "skenované",
+                "rozpoznání", "scan"
+            ]
+        case .cache:
+            return [
+                "cache", "ignorovat", "bypass", "vyčistit", "clear",
+                "uložené", "stored"
+            ]
+        }
+    }
+
+    /// Returns the first tab whose keywords contain the given query
+    /// (case- and diacritic-insensitive). `nil` for empty / no-match.
+    static func firstMatching(query: String) -> SettingsTab? {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return nil }
+        for tab in allCases {
+            if tab.searchKeywords.contains(where: { $0.lowercased().contains(q) }) {
+                return tab
+            }
+        }
+        return nil
     }
 }

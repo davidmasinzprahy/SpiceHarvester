@@ -34,6 +34,13 @@ struct ContentView: View {
     /// disappear and not accumulate monitors when the view re-appears.
     @State private var tabKeyMonitor: Any?
 
+    /// True while the "Opravdu vymazat prompt?" alert is showing. Promotes
+    /// the destructive Vymazat action from one-click to two-click — proper
+    /// undo would need NSUndoManager wiring through the responder chain
+    /// (deferred), but losing a long-edited prompt to a misclick is a real
+    /// risk that a confirmation dialog removes.
+    @State private var showClearPromptConfirm: Bool = false
+
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
@@ -83,6 +90,14 @@ struct ContentView: View {
             statusBar
         }
         .frame(minWidth: 940, minHeight: 660)
+        // Honor the user's Dynamic Type preference but clamp it: dense
+        // dashboards break above accessibility3 (text wraps cards into
+        // unreadable column widths). Below medium doesn't make text
+        // smaller than the system default; above accessibility3 we hold
+        // the line so the layout stays usable for people with mid-range
+        // visual accessibility needs without blowing up density-first
+        // pages for users with extreme settings.
+        .dynamicTypeSize(.medium ... .accessibility3)
         .coordinateSpace(name: "contentRoot")
         .onAppear {
             vm.refreshInputFolderStats()
@@ -129,6 +144,30 @@ struct ContentView: View {
     private func installTabKeyMonitor() {
         guard tabKeyMonitor == nil else { return }
         tabKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Cmd+F → focus the log filter field. Mirrors macOS-wide
+            // "Find" semantics; the log card has its own filter, so this
+            // skips having to register a global Cmd+F shortcut on the
+            // TextField (which would only fire when the field is already
+            // focused — useless).
+            if event.keyCode == 3 /* F */ &&
+               event.modifierFlags.contains(.command) &&
+               !event.modifierFlags.contains(.shift) {
+                focus = .logFilter
+                return nil
+            }
+
+            // Esc anywhere → release SwiftUI focus and jump to Run.
+            // Standard macOS pattern: Esc cancels modes / dismisses.
+            // For us, "cancels typing context" → user can immediately
+            // press Space/Enter to trigger Run.
+            if event.keyCode == 53 /* Escape */ {
+                if isTextInputFocused(NSApp.keyWindow?.firstResponder) {
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                }
+                focus = enabledFocusOrder.contains(.run) ? .run : enabledFocusOrder.first
+                return nil
+            }
+
             // Tab keyCode on US keyboard is 48; identical across layouts.
             guard event.keyCode == 48 else { return event }
             // Don't hijack Cmd+Tab / Ctrl+Tab / Option+Tab — those are system
@@ -265,6 +304,19 @@ struct ContentView: View {
                       ?? "Spustí kompletní pipeline: předzpracování + extrakci (Cmd+R)")
             }
         }
+    }
+
+    /// First non-empty line of a history entry, capped at 48 chars. Menu
+    /// items can't safely show 200-char prompts; this surfaces the
+    /// recognizable "title" most users put on their prompt's first line.
+    private func promptHistoryLabel(_ entry: String) -> String {
+        let firstLine = entry
+            .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
+            .first
+            .map(String.init) ?? entry
+        let trimmed = firstLine.trimmingCharacters(in: .whitespaces)
+        if trimmed.count <= 48 { return trimmed }
+        return String(trimmed.prefix(45)) + "…"
     }
 
     /// Tiny pill-shaped affordance that signals "this edge is draggable".
@@ -945,6 +997,27 @@ struct ContentView: View {
             .focused($focus, equals: .loadPrompts)
             .help("Načte .md prompty ze složky Prompty")
 
+            // Recent prompts the user actually committed to running. Acts as
+            // a lightweight "undo across runs" — if the user clears the
+            // editor by accident, the previous prompt is two clicks away.
+            if !vm.promptHistory.isEmpty {
+                Menu {
+                    ForEach(Array(vm.promptHistory.enumerated()), id: \.offset) { _, entry in
+                        Button {
+                            vm.loadPromptFromHistory(entry)
+                        } label: {
+                            Text(promptHistoryLabel(entry))
+                        }
+                    }
+                } label: {
+                    Label("Historie", systemImage: "clock.arrow.circlepath")
+                }
+                .menuStyle(.borderlessButton)
+                .controlSize(.small)
+                .frame(maxWidth: 110)
+                .help("Naposledy spuštěné prompty (max \(SHAppViewModel.promptHistoryLimit))")
+            }
+
             if !vm.availablePromptFiles.isEmpty {
                 Picker("Uložené prompty", selection: $vm.selectedPromptFile) {
                     Text("— vyber —").tag(URL?.none)
@@ -991,14 +1064,26 @@ struct ContentView: View {
             Spacer()
 
             if !vm.config.currentPrompt.isEmpty {
-                Button {
-                    vm.clearPrompt()
+                Button(role: .destructive) {
+                    showClearPromptConfirm = true
                 } label: {
                     Label("Vymazat", systemImage: "xmark.circle")
                 }
                 .buttonStyle(.borderless)
-                .tint(.blue)
                 .focused($focus, equals: .clearPrompt)
+                .help("Smaže obsah promptu — vyžaduje potvrzení.")
+                .confirmationDialog(
+                    "Opravdu vymazat prompt?",
+                    isPresented: $showClearPromptConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Vymazat", role: .destructive) {
+                        vm.clearPrompt()
+                    }
+                    Button("Zrušit", role: .cancel) { }
+                } message: {
+                    Text("Prompt obsahuje \(vm.config.currentPrompt.count) znaků. Vymazání nelze vrátit zpět.")
+                }
             }
         }
     }
@@ -1454,10 +1539,11 @@ struct ContentView: View {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("Filtr (např. ERROR)", text: $logFilter)
+                TextField("Filtr (Cmd+F)", text: $logFilter)
                     .textFieldStyle(.roundedBorder)
                     .controlSize(.small)
                     .frame(maxWidth: 220)
+                    .focused($focus, equals: .logFilter)
                 if !logFilter.isEmpty {
                     Button {
                         logFilter = ""
@@ -1490,34 +1576,14 @@ struct ContentView: View {
                 .help("Načíst aktuální obsah logu z disku")
             }
 
-            // Plain selectable text in a ScrollView (instead of a read-only TextEditor,
-            // which recreates its binding on every update and doesn't auto-scroll).
-            // The right column is no longer wrapped in an outer ScrollView, so this
-            // scroll view owns its momentum without macOS gesture conflicts.
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(displayedLogText)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .padding(6)
-                        .id("logBottom")
-                }
+            // Replaced SwiftUI Text-in-ScrollView with NSTextView wrapper —
+            // the SwiftUI version had to rebuild the entire layout tree on
+            // every log update, which became visibly laggy at ~50 kB. The
+            // wrapper also gives us native scroll inertia, find/select
+            // gestures, and respect for macOS keyboard shortcuts.
+            SHLogTextView(text: displayedLogText)
                 .background(.quinary, in: RoundedRectangle(cornerRadius: 6))
                 .frame(minHeight: 200, maxHeight: .infinity)
-                .onChange(of: vm.logText) { _, _ in
-                    // Scroll to the end whenever the log grows so the user always
-                    // sees the most recent activity.
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo("logBottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: logFilter) { _, _ in
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo("logBottom", anchor: .bottom)
-                    }
-                }
-            }
         }
         .frame(maxHeight: .infinity)
     }
@@ -1601,4 +1667,6 @@ enum SHFocusField: Hashable {
     case loadPrompts, noThink, think, clearPrompt, promptEditor
     // Bottom run-bar
     case run, cancel, output, help
+    // Log
+    case logFilter
 }

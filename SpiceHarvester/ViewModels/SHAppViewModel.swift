@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AppKit
 import Observation
+import UserNotifications
 
 /// Outcome classification for the most recent run. Drives the completion badge
 /// shown in the Actions bar ("Hotovo", "Přerušeno", "Selhalo").
@@ -95,6 +96,14 @@ final class SHAppViewModel {
     /// phase-related state lives in one struct, but exposed here too for the
     /// view's `.onChange` subscriptions.
     private var inflightItems: Set<String> = []
+
+    /// Last few non-empty prompts the user actually launched a run with.
+    /// Persisted across launches so that the most common scenario (user
+    /// iterates on a prompt, runs, edits, runs) keeps a recoverable trail
+    /// even when SwiftUI's TextEditor undo stack is gone (cleared on
+    /// app restart). Capped at `promptHistoryLimit`. Most recent first.
+    var promptHistory: [String] = []
+    static let promptHistoryLimit: Int = 8
 
     /// Is the currently selected server's last verification still valid?
     var isSelectedServerVerified: Bool {
@@ -338,36 +347,60 @@ final class SHAppViewModel {
     // MARK: – Input folder stats
 
     /// Re-scans the input folder for PDFs and updates `inputFolderPdfCount` /
-    /// `inputFolderPdfBytes`. Cheap (FileManager enumerator, no parsing); safe to
-    /// call from the main actor. Clears the chip when the folder is unset.
+    /// `inputFolderPdfBytes`. The scan runs on a detached background task —
+    /// folders with thousands of files would otherwise block the main thread
+    /// long enough to drop frames during typing / window resize. Subsequent
+    /// calls cancel the in-flight scan so the user always sees stats for the
+    /// **current** folder, never a stale earlier scan that finished late.
     func refreshInputFolderStats() {
         let trimmed = config.inputFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Always cancel any pending scan first. Newer folder selection wins.
+        inputFolderScanTask?.cancel()
+        inputFolderScanTask = nil
+
         guard !trimmed.isEmpty else {
             inputFolderPdfCount = nil
             inputFolderPdfBytes = nil
             return
         }
 
-        // Use the same scoped-access wrapper as the rest of the app so a folder
-        // selected in a previous session (security-scoped bookmark) keeps working.
-        let scanner = SHFileScanService()
-        let result: (count: Int, bytes: Int64)? = withScopedAccess(to: trimmed) { url in
+        // Snapshot scoped URL on the main actor (security-scoped resolution
+        // touches MainActor-isolated config), then hand the URL to a
+        // background task for the actual filesystem walk.
+        guard let url = resolveScopedURL(for: trimmed) else {
+            inputFolderPdfCount = nil
+            inputFolderPdfBytes = nil
+            return
+        }
+
+        inputFolderScanTask = Task.detached(priority: .userInitiated) { [weak self] in
+            // Hold scoped access only inside the detached task — main actor
+            // doesn't need to wait for the scan to finish before returning.
+            let started = url.startAccessingSecurityScopedResource()
+            defer { if started { url.stopAccessingSecurityScopedResource() } }
+
+            let scanner = SHFileScanService()
             let urls = scanner.recursivePDFs(in: url)
+
+            // Cooperative cancellation between scan and size summation.
+            if Task.isCancelled { return }
+
             var bytes: Int64 = 0
             for u in urls {
+                if Task.isCancelled { return }
                 if let size = try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize {
                     bytes += Int64(size)
                 }
             }
-            return (urls.count, bytes)
-        }
+            let count = urls.count
+            let totalBytes = bytes
 
-        if let result {
-            inputFolderPdfCount = result.count
-            inputFolderPdfBytes = result.bytes
-        } else {
-            inputFolderPdfCount = nil
-            inputFolderPdfBytes = nil
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard !Task.isCancelled else { return }
+                self.inputFolderPdfCount = count
+                self.inputFolderPdfBytes = totalBytes
+            }
         }
     }
 
@@ -456,6 +489,11 @@ final class SHAppViewModel {
     /// user-initiated cancellation.
     private var currentTask: Task<SHRunOutcome, Never>?
     private var embeddingValidationTask: Task<Void, Never>?
+    /// Detached task scanning the input folder for PDFs. Held so that
+    /// successive `refreshInputFolderStats` calls can cancel the previous
+    /// scan — switching folders rapidly would otherwise let an old scan
+    /// finish and overwrite stats for the new folder.
+    private var inputFolderScanTask: Task<Void, Never>?
     /// True for the brief window where a task is about to start – guards against
     /// back-to-back clicks racing past the `isRunning` flag.
     private var runEntered: Bool = false
@@ -503,6 +541,16 @@ final class SHAppViewModel {
         // user's last chosen value is in effect immediately, not only after they
         // first touch the stepper).
         rebuildLMClient()
+
+        // Ask once for permission to surface completion via Notification Center.
+        // The user can deny; we degrade gracefully (in-app banner remains).
+        requestNotificationAuthorizationIfNeeded()
+
+        // Restore prompt history (deduped string array). Limited to N entries
+        // per `promptHistoryLimit`, anything beyond is silently truncated.
+        if let saved = UserDefaults.standard.array(forKey: Self.promptHistoryKey) as? [String] {
+            self.promptHistory = Array(saved.prefix(Self.promptHistoryLimit))
+        }
 
         // Flush any pending debounced persist when the app is about to terminate.
         // Prevents data loss when the user is mid-edit (300 ms window) and
@@ -941,6 +989,30 @@ final class SHAppViewModel {
         await executeRun { await self.performPreprocessing() }
     }
 
+    /// Pushes the current prompt onto `promptHistory` (most recent first,
+    /// deduplicated, capped). Called at run start — only prompts the user
+    /// actually committed to running are worth remembering, draft text is
+    /// not persisted here.
+    func recordPromptInHistory() {
+        let trimmed = config.currentPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        promptHistory.removeAll { $0 == trimmed }
+        promptHistory.insert(trimmed, at: 0)
+        if promptHistory.count > Self.promptHistoryLimit {
+            promptHistory.removeLast(promptHistory.count - Self.promptHistoryLimit)
+        }
+        UserDefaults.standard.set(promptHistory, forKey: Self.promptHistoryKey)
+    }
+
+    /// Restore a prompt from history into the editor. Doesn't run anything;
+    /// user explicitly triggers Run after picking.
+    func loadPromptFromHistory(_ entry: String) {
+        config.currentPrompt = entry
+        persistAllDebounced()
+    }
+
+    private static let promptHistoryKey = "SHPromptHistory"
+
     func runExtraction() async {
         await executeRun {
             // If no cached docs yet, run preprocessing first – but inside the same
@@ -958,6 +1030,7 @@ final class SHAppViewModel {
     }
 
     func runAll() async {
+        recordPromptInHistory()
         await executeRun {
             let preOutcome = await self.performPreprocessing()
             if preOutcome != .success { return preOutcome }
@@ -1022,9 +1095,58 @@ final class SHAppViewModel {
             lastCompletion = nil
         }
 
+        // Surface completion via Notification Center when the app is in the
+        // background — long batches (30+ min) often run while the user has
+        // switched to other work, and silent in-app banner is missed. We
+        // suppress the notification when the app is the frontmost active
+        // app: the in-app banner already covers that case.
+        if outcome != .notStarted, !NSApp.isActive {
+            postCompletionNotification(for: outcome)
+        }
+
         isRunning = false
         runEntered = false
         currentTask = nil
+    }
+
+    // MARK: – Notification Center
+
+    /// Requests one-time authorization for local notifications. Called from
+    /// `init` (best-effort, ignores result). The first run prompt is the
+    /// standard macOS dialog the user can accept or deny; we never block
+    /// on the answer.
+    private func requestNotificationAuthorizationIfNeeded() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
+            // Intentionally ignored: a denied prompt simply means the
+            // completion banner stays the only feedback channel.
+        }
+    }
+
+    private func postCompletionNotification(for outcome: SHRunOutcome) {
+        let content = UNMutableNotificationContent()
+        switch outcome {
+        case .success:
+            content.title = "Spice Harvester: hotovo"
+            content.body = statusText
+            content.sound = .default
+        case .cancelled:
+            content.title = "Spice Harvester: přerušeno"
+            content.body = statusText
+        case .failed:
+            content.title = "Spice Harvester: chyba"
+            content.body = statusText
+            content.sound = .default
+        case .notStarted:
+            return
+        }
+        // Immediate delivery; nil trigger means "now". Identifier is
+        // unique-per-completion so multiple runs don't replace each other.
+        let request = UNNotificationRequest(
+            identifier: "spiceharvester.completion.\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { _ in }
     }
 
     private func performPreprocessing() async -> SHRunOutcome {
