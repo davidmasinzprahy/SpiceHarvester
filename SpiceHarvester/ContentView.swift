@@ -312,19 +312,23 @@ struct ContentView: View {
         // discoverability). Without this, four labelled buttons + the
         // status pill could overflow on a 940 pt min-width window when
         // localized to longer strings.
+        //
+        // `.labelStyle()` propagates to descendant Labels via SwiftUI's
+        // environment — applying it on the whole HStack is enough; we
+        // don't have to thread a LabelStyle parameter through every
+        // Button. Two concrete variants (no generics) keep the layout
+        // measurement deterministic.
         ViewThatFits(in: .horizontal) {
-            runRowContent(labelStyle: .titleAndIcon)
-            runRowContent(labelStyle: .iconOnly)
+            runRowBody.labelStyle(.titleAndIcon)
+            runRowBody.labelStyle(.iconOnly)
         }
     }
 
-    /// Run row body parameterized by label style. Both variants are
-    /// rendered into ViewThatFits which picks the wider one when it fits.
-    /// Generic `S: LabelStyle` instead of any-erased type so the SwiftUI
-    /// inference picks concrete `TitleAndIconLabelStyle` vs
-    /// `IconOnlyLabelStyle` at compile time.
+    /// Shared body of the run row — every variant share this exact
+    /// structure and only differs in the ambient `.labelStyle` set by
+    /// the wrapping ViewThatFits branch.
     @ViewBuilder
-    private func runRowContent<S: LabelStyle>(labelStyle: S) -> some View {
+    private var runRowBody: some View {
         HStack(spacing: 10) {
             statusIndicator
             Spacer()
@@ -334,7 +338,6 @@ struct ContentView: View {
                 } label: {
                     Label("Přerušit", systemImage: "stop.circle.fill")
                 }
-                .labelStyle(labelStyle)
                 .buttonStyle(.bordered)
                 .tint(.red)
                 .focused($focus, equals: .cancel)
@@ -346,7 +349,6 @@ struct ContentView: View {
                 } label: {
                     Label("Spustit", systemImage: "play.fill")
                 }
-                .labelStyle(labelStyle)
                 .buttonStyle(.borderedProminent)
                 .tint(.blue)
                 .disabled(!vm.canRunAll)
@@ -361,7 +363,6 @@ struct ContentView: View {
             } label: {
                 Label("Výstup", systemImage: "folder")
             }
-            .labelStyle(labelStyle)
             .buttonStyle(.bordered)
             .disabled(!vm.canOpenOutput)
             .focused($focus, equals: .output)
@@ -381,7 +382,6 @@ struct ContentView: View {
             } label: {
                 Label("Nápověda", systemImage: "questionmark.circle")
             }
-            .labelStyle(labelStyle)
             .buttonStyle(.bordered)
             .focused($focus, equals: .help)
             .modifier(VisibleFocusRing(isFocused: focus == .help))

@@ -726,9 +726,9 @@ final class SHAppViewModel {
         // first touch the stepper).
         rebuildLMClient()
 
-        // Ask once for permission to surface completion via Notification Center.
-        // The user can deny; we degrade gracefully (in-app banner remains).
-        requestNotificationAuthorizationIfNeeded()
+        // Notification authorization request lives in SHAppDelegate so it
+        // fires once per process, not once per view-model (every scratch
+        // window would re-trigger setNotificationCategories otherwise).
 
         // Restore prompt history (deduped string array). Limited to N entries
         // per `promptHistoryLimit`, anything beyond is silently truncated.
@@ -769,7 +769,13 @@ final class SHAppViewModel {
         // intents without holding a reference to this view-model. The intents
         // post these notifications and we react here. See `SHAppIntents.swift`
         // for the producing side.
-        if #available(macOS 13.0, *) {
+        //
+        // CRITICAL: only the .persistent (primary) view-model registers the
+        // observer. Without this gate, every scratch window's view-model
+        // would also react to the AppIntent post and fire `runAll()` in
+        // parallel — N copies of the pipeline competing for the same LM
+        // Studio server, racing to write the same output folder.
+        if #available(macOS 13.0, *), persistenceMode == .persistent {
             NotificationCenter.default.addObserver(
                 forName: SHIntentNotifications.runAll,
                 object: nil,
@@ -1282,6 +1288,11 @@ final class SHAppViewModel {
         if promptHistory.count > Self.promptHistoryLimit {
             promptHistory.removeLast(promptHistory.count - Self.promptHistoryLimit)
         }
+        // Scratch windows: keep history in-memory for the run (so
+        // Cmd+Shift+Z / Historie menu work this session) but don't write
+        // back. Otherwise an experimental scratch run pollutes the
+        // primary window's persistent prompt history.
+        guard persistenceMode == .persistent else { return }
         UserDefaults.standard.set(promptHistory, forKey: Self.promptHistoryKey)
     }
 
@@ -1378,6 +1389,10 @@ final class SHAppViewModel {
             progressState = SHProgressViewState()
             cachedDocuments.removeAll()
             cachedDocumentsInputPath = ""
+            // Project switch implies the user wants a fresh banner read;
+            // a "Skrýt" dismissal that made sense for project A doesn't
+            // necessarily apply to project B.
+            dismissedConflictIDs.removeAll()
 
             // Apply the snapshot.
             config.inputFolder = snapshot.inputFolder
@@ -1451,6 +1466,11 @@ final class SHAppViewModel {
             list.removeLast(list.count - Self.recentFoldersLimit)
         }
         recentFolders[kind] = list
+        // Scratch windows skip the persistent write — same rationale as
+        // recordPromptInHistory. In-memory list still updates so the
+        // Recents menu in this scratch window reflects the new entry,
+        // but the primary's stored list isn't touched.
+        guard persistenceMode == .persistent else { return }
         // UserDefaults.set serializes through main thread by default;
         // for a single ~5-element string array per folder slot it's
         // submillisecond, but we move it off-main as a defensive
@@ -1592,33 +1612,8 @@ final class SHAppViewModel {
 
     // MARK: – Notification Center
 
-    /// Requests one-time authorization for local notifications. Called from
-    /// `init` (best-effort, ignores result). The first run prompt is the
-    /// standard macOS dialog the user can accept or deny; we never block
-    /// on the answer.
-    private func requestNotificationAuthorizationIfNeeded() {
-        // Register the completion category up front so a notification posted
-        // immediately after authorization includes the action button. macOS
-        // attaches actions to a notification by category id, and the
-        // category must be set before `add(request:)` is called.
-        let openOutputAction = UNNotificationAction(
-            identifier: SHCompletionNotification.openOutputActionID,
-            title: "Otevřít výstup",
-            options: [.foreground]
-        )
-        let category = UNNotificationCategory(
-            identifier: SHCompletionNotification.categoryID,
-            actions: [openOutputAction],
-            intentIdentifiers: [],
-            options: []
-        )
-        UNUserNotificationCenter.current().setNotificationCategories([category])
-
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
-            // Intentionally ignored: a denied prompt simply means the
-            // completion banner stays the only feedback channel.
-        }
-    }
+    // Notification authorization & category registration moved to
+    // `SHAppDelegate.applicationDidFinishLaunching` (process-singleton).
 
     private func postCompletionNotification(for outcome: SHRunOutcome) {
         let content = UNMutableNotificationContent()

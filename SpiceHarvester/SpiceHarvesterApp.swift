@@ -9,6 +9,23 @@ import SwiftUI
 import AppKit
 import UserNotifications
 
+/// `FocusedValueKey` published by every ContentView (primary + scratch).
+/// Its value is the binding to that window's `showHelp` flag, so the
+/// Help command can toggle the *focused* window's sheet rather than
+/// always toggling the primary window's. Without this, Cmd+? from a
+/// scratch window opened the primary's help sheet — coordination
+/// violation across windows.
+struct ShowHelpFocusedKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
+extension FocusedValues {
+    var showHelpBinding: Binding<Bool>? {
+        get { self[ShowHelpFocusedKey.self] }
+        set { self[ShowHelpFocusedKey.self] = newValue }
+    }
+}
+
 @main
 struct SpiceHarvesterApp: App {
     @NSApplicationDelegateAdaptor(SHAppDelegate.self) var appDelegate
@@ -19,6 +36,10 @@ struct SpiceHarvesterApp: App {
     /// over the same UserDefaults slot.
     @State private var vm = SHAppViewModel()
     @State private var showHelp = false
+    /// `@FocusedValue` so the Help command in `.commands` can read the
+    /// currently-focused window's help binding. Falls back to primary
+    /// `showHelp` when no window publishes a binding (edge case).
+    @FocusedValue(\.showHelpBinding) private var focusedShowHelp
     /// Environment hook to open the secondary "scratch" window from menu
     /// commands. Only available macOS 13+, which is below our deployment
     /// target so no @available guard needed.
@@ -27,6 +48,7 @@ struct SpiceHarvesterApp: App {
     var body: some Scene {
         WindowGroup(id: "main") {
             ContentView(vm: vm, showHelp: $showHelp)
+                .focusedSceneValue(\.showHelpBinding, $showHelp)
         }
         // `.defaultSize` is the SwiftUI fallback for first-launch dimensions; the
         // AppDelegate below then adapts the actual launch frame to the current screen.
@@ -96,7 +118,15 @@ struct SpiceHarvesterApp: App {
 
             CommandGroup(replacing: .help) {
                 Button("Nápověda Spice Harvester") {
-                    showHelp = true
+                    // Toggle the currently-focused window's help binding
+                    // when we have one (multi-window scenario); fall back
+                    // to the primary's binding so Cmd+? at app launch
+                    // (no window focused yet) still works.
+                    if let focusedShowHelp {
+                        focusedShowHelp.wrappedValue = true
+                    } else {
+                        showHelp = true
+                    }
                 }
                 .keyboardShortcut("?", modifiers: .command)
             }
@@ -172,6 +202,10 @@ struct SHScratchRoot: View {
 
     var body: some View {
         ContentView(vm: vm, showHelp: $showHelp)
+            // Publish this scratch window's help binding so Cmd+?
+            // resolves to it when this window is focused, not to the
+            // primary's. See `ShowHelpFocusedKey` on the App scene.
+            .focusedSceneValue(\.showHelpBinding, $showHelp)
     }
 }
 
@@ -229,11 +263,41 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
         // is a no-op.
         UNUserNotificationCenter.current().delegate = self
 
+        // Register completion category + request authorization once per
+        // process. Previously this lived in SHAppViewModel.init which
+        // re-fired for every scratch window the user opened — wasteful
+        // and (with macOS' rate-limited prompt) potentially user-visible.
+        registerCompletionNotificationCategory()
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
+            // Intentionally ignored — denied auth degrades to in-app
+            // banner only, which is fine.
+        }
+
         // SwiftUI creates its window slightly after `applicationDidFinishLaunching`;
         // hop one run loop tick so `NSApp.mainWindow` / `NSApp.windows` is populated.
         DispatchQueue.main.async { [weak self] in
             self?.resizeMainWindowForCurrentScreen()
         }
+    }
+
+    /// Defines the "completion" notification category so banners posted
+    /// from `SHAppViewModel.postCompletionNotification` carry the
+    /// "Otevřít výstup" action button. Categories must be registered
+    /// before any notification using them is posted; doing this once
+    /// in app launch covers every subsequent post.
+    private func registerCompletionNotificationCategory() {
+        let openOutputAction = UNNotificationAction(
+            identifier: SHCompletionNotification.openOutputActionID,
+            title: "Otevřít výstup",
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: SHCompletionNotification.categoryID,
+            actions: [openOutputAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
     // MARK: – UNUserNotificationCenterDelegate
