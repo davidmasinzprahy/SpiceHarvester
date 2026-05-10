@@ -38,16 +38,24 @@ struct ContentView: View {
                 .padding(14)
                 .frame(minWidth: 460, idealWidth: 540)
 
-                // Right: pure workspace + monitoring. The Prompt editor owns
-                // the prime vertical space; banners stack right above it and
-                // Progress + Log sit below. With Run/Stop moved to the left
-                // column, this column has zero chrome — just content.
+                // Right: pure workspace + monitoring. Prompt / Progress / Log
+                // share vertical space through a `VSplitView` so the user can
+                // drag any divider to allocate room where they need it (e.g.
+                // expand Log during a long run, expand Prompt while editing).
+                // Each pane has a minHeight so nothing collapses to zero;
+                // VSplitView distributes the remaining space according to the
+                // user's drag gestures and remembers the proportions for the
+                // duration of the session.
                 VStack(alignment: .leading, spacing: 10) {
                     notificationStack
-                    promptsCard
-                        .frame(minHeight: 240, maxHeight: .infinity)
-                    progressStatusCard
-                    logCard
+                    VSplitView {
+                        promptsCard
+                            .frame(minHeight: 160, idealHeight: 280, maxHeight: .infinity)
+                        progressStatusCard
+                            .frame(minHeight: 70, idealHeight: 110)
+                        logCard
+                            .frame(minHeight: 140, idealHeight: 240, maxHeight: .infinity)
+                    }
                 }
                 .padding(14)
                 .frame(minWidth: 480)
