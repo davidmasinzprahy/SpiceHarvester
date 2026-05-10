@@ -17,8 +17,6 @@ struct ContentView: View {
     /// Honors System Settings → Accessibility → Display → Reduce motion. Used
     /// to skip the header logo wobble for users who explicitly opted out.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var leftCardsAnchorY: CGFloat = 0
-    @State private var progressCardY: CGFloat = 0
     /// Optional case-insensitive substring filter applied to the log card. Empty
     /// = show all lines. Lives on the view (not the view model) because filtering
     /// is purely a presentation concern — the on-disk log is unchanged.
@@ -27,36 +25,35 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                // Left: configuration (folders / server / prompt). The prompt
-                // editor expands with the window, matching the runtime log.
+                // Left: configuration the user sets up *before* a run (folders,
+                // server, model). Onboarding lives here too — it points at these
+                // cards, so being above them is the natural reading order.
                 VStack(alignment: .leading, spacing: 10) {
                     header
-                    leftCardsAlignmentMarker
                     leftConfigurationCards
-                        .padding(.top, leftCardsTopAlignmentOffset)
                 }
                 .padding(14)
-                .frame(minWidth: 540, idealWidth: 620)
+                .frame(minWidth: 460, idealWidth: 540)
 
-                // Right: runtime. The runtime header now also hosts notification
-                // banners (conflict + completion) so everything that needs the
-                // user's attention lives in one column instead of split between
-                // the prompt area and the runtime column.
+                // Right: workspace. The Prompt editor is the artifact the user
+                // iterates on most often, so it lives in the larger workspace
+                // column above progress + log. Banners stack right under the
+                // toolbar so anything needing attention shows up first.
                 VStack(alignment: .leading, spacing: 10) {
                     runtimeHeaderSpacer
                     notificationStack
+                    promptsCard
+                        .frame(minHeight: 240, maxHeight: .infinity)
                     progressStatusCard
                     logCard
                 }
                 .padding(14)
-                .frame(minWidth: 420)
+                .frame(minWidth: 480)
             }
             statusBar
         }
-        .frame(minWidth: 980, minHeight: 680)
+        .frame(minWidth: 940, minHeight: 660)
         .coordinateSpace(name: "contentRoot")
-        .onPreferenceChange(LeftCardsAnchorPreferenceKey.self) { leftCardsAnchorY = $0 }
-        .onPreferenceChange(ProgressCardYPreferenceKey.self) { progressCardY = $0 }
         .onAppear { vm.refreshInputFolderStats() }
         .onChange(of: vm.config.inputFolder) { _, _ in
             vm.refreshInputFolderStats()
@@ -97,25 +94,6 @@ struct ContentView: View {
         }
     }
 
-    private var leftCardsTopAlignmentOffset: CGFloat {
-        guard leftCardsAnchorY > 0, progressCardY > 0 else { return 0 }
-        return max(0, progressCardY - leftCardsAnchorY - leftCardsAlignmentSpacingCorrection)
-    }
-
-    private var leftCardsAlignmentSpacingCorrection: CGFloat { 10 }
-
-    private var leftCardsAlignmentMarker: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .preference(
-                    key: LeftCardsAnchorPreferenceKey.self,
-                    value: proxy.frame(in: .named("contentRoot")).minY
-                )
-        }
-        .frame(height: 0)
-        .accessibilityHidden(true)
-    }
-
     private var leftConfigurationCards: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !vm.isSetupComplete {
@@ -123,53 +101,97 @@ struct ContentView: View {
             }
             foldersCard
             serverCard
-            promptsCard
-                .frame(maxHeight: .infinity)
+            Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
     /// Onboarding banner shown above the configuration cards while any of the
-    /// four required steps is missing. Each row is a static line — checked or
-    /// unchecked — so the count never changes and the banner doesn't jump
-    /// around as steps are filled in. Auto-hides the moment all four steps
-    /// pass; never reappears after that within the same session.
+    /// Compact horizontal onboarding indicator. Shown only while at least one
+    /// of the four setup steps is missing. The step labels live as a single
+    /// row of "chips" so the banner takes one card-row of vertical space
+    /// instead of four. The next-step hint underneath is contextual: it
+    /// surfaces the first missing step's tip, guiding the user to act, not
+    /// just listing all steps statically.
     private var onboardingCard: some View {
         let steps = vm.setupSteps
         let doneCount = steps.filter(\.isDone).count
+        let nextStep = steps.first(where: { !$0.isDone })
+
         return GlassCard(title: "Začni tady", systemImage: "wand.and.stars") {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Vyplň následující čtyři kroky a pak stiskni **Spustit** v horní liště.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                ForEach(steps) { step in
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: step.isDone ? "checkmark.circle.fill" : "circle")
-                            .font(.callout)
-                            .foregroundStyle(step.isDone ? .green : .secondary)
-                            .symbolRenderingMode(.hierarchical)
-                            .padding(.top, 1)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(step.title)
-                                .font(.footnote.weight(.semibold))
-                                .strikethrough(step.isDone, color: .secondary)
-                                .foregroundStyle(step.isDone ? .secondary : .primary)
-                            Text(step.hint)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                        onboardingChip(step: step, index: index + 1)
+                        if index < steps.count - 1 {
+                            Rectangle()
+                                .fill(step.isDone ? Color.green.opacity(0.45) : Color.primary.opacity(0.10))
+                                .frame(height: 1)
+                                .frame(maxWidth: .infinity)
                         }
-                        Spacer(minLength: 4)
                     }
                 }
 
-                ProgressView(value: Double(doneCount), total: Double(steps.count))
-                    .tint(.green)
-                    .padding(.top, 2)
+                if let nextStep {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.forward.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                            .symbolRenderingMode(.hierarchical)
+                        Text("Další krok – **\(nextStep.title)**: \(nextStep.hint)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("\(doneCount) / \(steps.count)")
+                            .font(.caption.monospacedDigit().weight(.medium))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
         }
+    }
+
+    /// One step in the horizontal onboarding strip. Compact "chip" with the
+    /// numeric index (or check) and an abbreviated label so the whole row
+    /// fits even at the narrowest configured column width (460 pt).
+    private func onboardingChip(step: SHSetupStep, index: Int) -> some View {
+        let tint: Color = step.isDone ? .green : .secondary
+        let shortLabel: String = {
+            switch step.id {
+            case "input":  return "Vstup"
+            case "output": return "Výstup"
+            case "server": return "Server"
+            case "prompt": return "Prompt"
+            default:       return step.title
+            }
+        }()
+        return HStack(spacing: 5) {
+            ZStack {
+                Circle()
+                    .fill(step.isDone ? Color.green : Color.primary.opacity(0.06))
+                    .frame(width: 18, height: 18)
+                Circle()
+                    .strokeBorder(step.isDone ? Color.green : Color.primary.opacity(0.20), lineWidth: 0.8)
+                    .frame(width: 18, height: 18)
+                if step.isDone {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                } else {
+                    Text("\(index)")
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(shortLabel)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(step.isDone ? .secondary : .primary)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .help(step.title + " – " + step.hint)
+        .accessibilityLabel("\(step.title): \(step.isDone ? "hotovo" : "ještě nehotovo")")
     }
 
     // MARK: – Runtime actions
@@ -906,15 +928,6 @@ struct ContentView: View {
                 progressFinishedContent
             }
         }
-        .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .preference(
-                        key: ProgressCardYPreferenceKey.self,
-                        value: proxy.frame(in: .named("contentRoot")).minY
-                    )
-            }
-        }
     }
 
     private var progressIdleContent: some View {
@@ -952,7 +965,10 @@ struct ContentView: View {
             return perDocSeconds * Double(count)
         }()
 
-        let perDocLabel = humanDuration(perDocSeconds)
+        // Use the sub-second-aware formatter — `humanDuration` rounds anything
+        // under 0.5 s to "0 s", which produced the misleading "ø 0 s/dok"
+        // when the previous run was all-cache-hit (a few ms per document).
+        let perDocLabel = humanDurationDetailed(perDocSeconds)
         let predictedLabel = predicted.map { "≈ \(humanDuration($0))" } ?? "—"
         let countLabel = count.map { "\($0) dok" } ?? "—"
 
@@ -1198,6 +1214,23 @@ struct ContentView: View {
         return "\(h) h \(mm) min"
     }
 
+    /// Variant of `humanDuration` that preserves sub-second resolution. Used
+    /// for the per-document baseline ("ø 0,4 s/dok") where rounding to 0
+    /// would be actively misleading on cache-only runs. Falls back to the
+    /// minute-formatter once we cross 1 s, so the two formatters agree on
+    /// values where it matters (long runs).
+    private func humanDurationDetailed(_ seconds: Double) -> String {
+        if seconds < 0.001 { return "<1 ms" }
+        if seconds < 1 {
+            return String(format: "%.0f ms", seconds * 1000)
+        }
+        if seconds < 10 {
+            // 1–10 s: one decimal so "ø 1,4 s/dok" reads naturally.
+            return String(format: "%.1f s", seconds)
+        }
+        return humanDuration(seconds)
+    }
+
     // MARK: – Log
 
     private var logCard: some View {
@@ -1341,25 +1374,5 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34)
         .background(.thinMaterial)
         .overlay(Divider(), alignment: .top)
-    }
-}
-
-private struct LeftCardsAnchorPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        let next = nextValue()
-        guard next > 0 else { return }
-        value = value == 0 ? next : min(value, next)
-    }
-}
-
-private struct ProgressCardYPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        let next = nextValue()
-        guard next > 0 else { return }
-        value = value == 0 ? next : min(value, next)
     }
 }
