@@ -22,6 +22,18 @@ struct ContentView: View {
     /// is purely a presentation concern — the on-disk log is unchanged.
     @State private var logFilter: String = ""
 
+    /// Currently focused control inside the Tab cycle. `nil` means "no SwiftUI
+    /// control owns focus" (e.g. the user just clicked on background) — the
+    /// next Tab keypress jumps to the first enabled field. The cycle skips
+    /// disabled controls automatically via `enabledFocusOrder`.
+    @FocusState private var focus: SHFocusField?
+
+    /// `NSEvent` local monitor handle that intercepts Tab / Shift+Tab so we
+    /// can advance `focus` ourselves regardless of System Settings →
+    /// Keyboard → "Keyboard navigation". Stored so we can remove it on
+    /// disappear and not accumulate monitors when the view re-appears.
+    @State private var tabKeyMonitor: Any?
+
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
@@ -72,7 +84,11 @@ struct ContentView: View {
         }
         .frame(minWidth: 940, minHeight: 660)
         .coordinateSpace(name: "contentRoot")
-        .onAppear { vm.refreshInputFolderStats() }
+        .onAppear {
+            vm.refreshInputFolderStats()
+            installTabKeyMonitor()
+        }
+        .onDisappear { removeTabKeyMonitor() }
         .onChange(of: vm.config.inputFolder) { _, _ in
             vm.refreshInputFolderStats()
         }
@@ -90,6 +106,111 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
         }
+    }
+
+    // MARK: – Tab focus cycle
+
+    /// Installs an `NSEvent` local monitor that intercepts Tab and Shift+Tab
+    /// app-wide and routes them through `advanceFocus`. macOS by default only
+    /// cycles Tab through buttons when System Settings → Keyboard → "Keyboard
+    /// navigation" is on; this monitor makes the cycle work regardless of that
+    /// setting, which is important because most users leave it off.
+    ///
+    /// The monitor is a no-op when:
+    ///   1. Focus is on a text input (`promptEditor`, server URL, etc.) — in
+    ///      that case Tab inserts a tab character / advances the field's own
+    ///      input handling, the more familiar AppKit behavior.
+    ///   2. The keypress is intercepted by the menu (Cmd+Tab is system-level
+    ///      so we never see it here anyway).
+    ///
+    /// Returns `nil` from the handler to consume the event; returns the event
+    /// unchanged to let downstream handlers (TextField, TextEditor) process it.
+    private func installTabKeyMonitor() {
+        guard tabKeyMonitor == nil else { return }
+        tabKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Tab keyCode on US keyboard is 48; identical across layouts.
+            guard event.keyCode == 48 else { return event }
+            // Don't hijack Cmd+Tab / Ctrl+Tab / Option+Tab — those are system
+            // shortcuts (app switcher) or native macOS focus gestures.
+            let pure = event.modifierFlags.intersection([.command, .control, .option])
+            guard pure.isEmpty else { return event }
+            // Let text inputs handle Tab natively. SwiftUI doesn't expose a
+            // first-responder query, but the focused field name tells us
+            // whether a text editor / picker has focus.
+            if isTextInputFocused(NSApp.keyWindow?.firstResponder) {
+                return event
+            }
+            let reverse = event.modifierFlags.contains(.shift)
+            advanceFocus(reverse: reverse)
+            return nil
+        }
+    }
+
+    /// Drops the monitor when the view disappears. Forgetting this would
+    /// leak a handler closure that retains `self` for the lifetime of the app.
+    private func removeTabKeyMonitor() {
+        if let token = tabKeyMonitor {
+            NSEvent.removeMonitor(token)
+            tabKeyMonitor = nil
+        }
+    }
+
+    /// True when the current first responder is an `NSTextView` or
+    /// `NSTextField` editor — i.e. a user-typing context where Tab should
+    /// behave as native (insert / advance within the field) rather than
+    /// cycle our buttons. Walks up the responder chain so we catch the
+    /// `NSTextView` that backs SwiftUI's `TextEditor`.
+    private func isTextInputFocused(_ responder: NSResponder?) -> Bool {
+        var current: NSResponder? = responder
+        while let r = current {
+            if r is NSTextView || r is NSTextField { return true }
+            current = r.nextResponder
+        }
+        return false
+    }
+
+    /// Advances `focus` by one step in `enabledFocusOrder`. Loops at the end /
+    /// beginning, so Tab from the last field wraps to the first and Shift+Tab
+    /// from the first wraps to the last. When nothing is currently focused
+    /// (`focus == nil`) Tab lands on the first enabled control, Shift+Tab on
+    /// the last — this matches AppKit's natural "press Tab to start cycling"
+    /// behavior.
+    private func advanceFocus(reverse: Bool) {
+        let order = enabledFocusOrder
+        guard !order.isEmpty else { return }
+        if let current = focus, let idx = order.firstIndex(of: current) {
+            let nextIdx = reverse
+                ? (idx - 1 + order.count) % order.count
+                : (idx + 1) % order.count
+            focus = order[nextIdx]
+        } else {
+            focus = reverse ? order.last : order.first
+        }
+    }
+
+    /// Tab cycle order. Spatial reading order (top-down, left-right, then
+    /// bottom toolbar). Each entry is gated by the same `canX` predicate that
+    /// drives the control's disabled state, so disabled buttons are skipped
+    /// — matching the user's request "pouze na aktivní tlačítka".
+    private var enabledFocusOrder: [SHFocusField] {
+        var fields: [SHFocusField] = []
+        // Folder rows: always interactive (no disabled state on Vybrat/Změnit).
+        fields.append(contentsOf: [.inputFolder, .outputFolder, .cacheFolder, .promptFolder])
+        // Server card.
+        if vm.canVerifyServer && !vm.isRunning { fields.append(.verifyServer) }
+        // Prompt toolbar.
+        if vm.canLoadPrompts { fields.append(.loadPrompts) }
+        fields.append(contentsOf: [.noThink, .think])
+        if !vm.config.currentPrompt.isEmpty { fields.append(.clearPrompt) }
+        // Bottom run-bar.
+        if vm.isRunning {
+            fields.append(.cancel)
+        } else if vm.canRunAll {
+            fields.append(.run)
+        }
+        if vm.canOpenOutput { fields.append(.output) }
+        fields.append(.help)
+        return fields
     }
 
     /// Right-column notification stack: completion banner first (post-run), then
@@ -223,6 +344,7 @@ struct ContentView: View {
                     Label("Přerušit", systemImage: "stop.circle.fill")
                 }
                 .labelStyle(.titleAndIcon)
+                .focused($focus, equals: .cancel)
                 .help("Přeruší aktuálně běžící úlohu (Cmd+.)")
             } else {
                 Button {
@@ -232,6 +354,7 @@ struct ContentView: View {
                 }
                 .labelStyle(.titleAndIcon)
                 .disabled(!vm.canRunAll)
+                .focused($focus, equals: .run)
                 .help(vm.missingRequirementsHint
                       ?? "Spustí kompletní pipeline: předzpracování + extrakci (Cmd+R)")
             }
@@ -243,6 +366,7 @@ struct ContentView: View {
             }
             .labelStyle(.titleAndIcon)
             .disabled(!vm.canOpenOutput)
+            .focused($focus, equals: .output)
             .help("Otevřít složku výstupu ve Finderu (Cmd+Shift+O)")
 
             Button {
@@ -251,6 +375,7 @@ struct ContentView: View {
                 Label("Nápověda", systemImage: "questionmark.circle")
             }
             .labelStyle(.titleAndIcon)
+            .focused($focus, equals: .help)
             .help("Otevřít nápovědu (Cmd+?)")
         }
     }
@@ -368,6 +493,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     folderRow(icon: "tray.and.arrow.down.fill", label: "Vstup",
                               path: vm.config.inputFolder, action: vm.chooseInputFolder,
+                              focusField: .inputFolder,
                               onDrop: { vm.config.inputFolder = $0; vm.persistAllDebounced() })
                     if let chip = vm.inputFolderChipLabel {
                         inputFolderChip(chip)
@@ -375,12 +501,15 @@ struct ContentView: View {
                 }
                 folderRow(icon: "tray.and.arrow.up.fill", label: "Výstup",
                           path: vm.config.outputFolder, action: vm.chooseOutputFolder,
+                          focusField: .outputFolder,
                           onDrop: { vm.config.outputFolder = $0; vm.persistAllDebounced() })
                 folderRow(icon: "externaldrive.fill", label: "Cache",
                           path: vm.config.cacheFolder, action: vm.chooseCacheFolder,
+                          focusField: .cacheFolder,
                           onDrop: { vm.config.cacheFolder = $0; vm.persistAllDebounced() })
                 folderRow(icon: "doc.text.fill", label: "Prompty (.md)",
                           path: vm.config.promptFolder, action: vm.choosePromptFolder,
+                          focusField: .promptFolder,
                           onDrop: { vm.config.promptFolder = $0; vm.persistAllDebounced() })
             }
             // If the user manually replaces the input folder (e.g. via drop),
@@ -427,6 +556,7 @@ struct ContentView: View {
         label: String,
         path: String,
         action: @escaping () -> Void,
+        focusField: SHFocusField,
         onDrop: @escaping (String) -> Void
     ) -> some View {
         let isSelected = !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -476,6 +606,7 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .tint(.blue)
+            .focused($focus, equals: focusField)
             .help(isSelected ? "Vybrat jinou složku" : "Vybrat složku ve Finderu")
         }
     }
@@ -663,6 +794,7 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .tint(.green)
+            .focused($focus, equals: .verifyServer)
             .help("Server byl úspěšně ověřen v této session. Klikni pro nové ověření.")
         } else {
             Button {
@@ -673,6 +805,7 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .tint(.blue)
             .disabled(!vm.canVerifyServer)
+            .focused($focus, equals: .verifyServer)
             .help("Zkontrolovat spojení a načíst seznam modelů")
         }
     }
@@ -762,6 +895,7 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .tint(.blue)
             .disabled(!vm.canLoadPrompts)
+            .focused($focus, equals: .loadPrompts)
             .help("Načte .md prompty ze složky Prompty")
 
             if !vm.availablePromptFiles.isEmpty {
@@ -792,6 +926,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(vm.promptThinkingMode == .noThinking ? .green : .blue)
+                .focused($focus, equals: .noThink)
                 .help("Vloží do promptu /no_think. U podporovaných modelů zrychlí odpověď vypnutím thinking režimu.")
 
                 Button {
@@ -802,6 +937,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(vm.promptThinkingMode == .thinking ? .orange : .blue)
+                .focused($focus, equals: .think)
                 .help("Vloží do promptu /think. U podporovaných modelů zapne thinking režim.")
             }
 
@@ -815,6 +951,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderless)
                 .tint(.blue)
+                .focused($focus, equals: .clearPrompt)
             }
         }
     }
@@ -1397,4 +1534,18 @@ struct ContentView: View {
         .background(.thinMaterial)
         .overlay(Divider(), alignment: .top)
     }
+}
+
+/// Identifiers for the buttons / controls that participate in the Tab focus
+/// cycle. Order in the enum is purely cosmetic — `enabledFocusOrder` decides
+/// the actual cycle order based on which controls are enabled at the moment.
+enum SHFocusField: Hashable {
+    // Folders
+    case inputFolder, outputFolder, cacheFolder, promptFolder
+    // Server
+    case verifyServer
+    // Prompt toolbar
+    case loadPrompts, noThink, think, clearPrompt
+    // Bottom run-bar
+    case run, cancel, output, help
 }
