@@ -1152,6 +1152,110 @@ final class SHAppViewModel {
 
     private static let promptHistoryKey = "SHPromptHistory"
 
+    // MARK: – Save / Load Project (pragmatic DocumentGroup substitute)
+
+    /// Snapshot of everything that defines a "project" — folders, server
+    /// selection, model picks, prompt, mode. Excluded:
+    ///   - server registry (URL+API key, kept globally; switching project
+    ///     shouldn't blow away access to all my servers)
+    ///   - runtime state (isRunning, logs, lastCompletion)
+    ///   - performance prefs (concurrency, timeout — global tuning)
+    /// JSON-encoded, written via NSSavePanel. The full DocumentGroup
+    /// migration is documented in `docs/P2_BACKLOG_DEFERRED.md`; this
+    /// is the lightweight "project save / load" interim that gives the
+    /// user multi-project workflow without the structural refactor.
+    struct SHProjectSnapshot: Codable {
+        var inputFolder: String
+        var outputFolder: String
+        var cacheFolder: String
+        var promptFolder: String
+        var selectedInferenceModel: String
+        var selectedEmbeddingModel: String
+        var selectedRerankerModel: String
+        var selectedOCRModel: String
+        var extractionMode: SHExtractionMode
+        var currentPrompt: String
+        var lastLoadedPromptName: String
+        var schemaVersion: Int = 1
+    }
+
+    /// Encode current project state to a `.spiceharvester` JSON file
+    /// chosen via NSSavePanel. Returns the chosen URL on success so the
+    /// caller can show a confirmation; nil when the user cancelled.
+    @discardableResult
+    func saveProjectAs() -> URL? {
+        let snapshot = SHProjectSnapshot(
+            inputFolder: config.inputFolder,
+            outputFolder: config.outputFolder,
+            cacheFolder: config.cacheFolder,
+            promptFolder: config.promptFolder,
+            selectedInferenceModel: config.selectedInferenceModel,
+            selectedEmbeddingModel: config.selectedEmbeddingModel,
+            selectedRerankerModel: config.selectedRerankerModel,
+            selectedOCRModel: config.selectedOCRModel,
+            extractionMode: config.extractionMode,
+            currentPrompt: config.currentPrompt,
+            lastLoadedPromptName: config.lastLoadedPromptName
+        )
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "Spice Harvester Project.spiceharvester.json"
+        panel.title = "Uložit projekt jako…"
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(snapshot)
+            try data.write(to: url, options: .atomic)
+            statusText = "Projekt uložen: \(url.lastPathComponent)"
+            return url
+        } catch {
+            statusText = "Uložení projektu selhalo: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Restore project from a `.spiceharvester` JSON file. Server
+    /// registry is intentionally NOT included in the snapshot — switching
+    /// project shouldn't strip away the user's saved servers — but
+    /// `selectedInferenceModel` and other model picks are restored, so
+    /// they only "stick" if the same models are loaded on the current
+    /// server. We don't validate; whatever was saved is what gets set.
+    @discardableResult
+    func openProject() -> URL? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.title = "Otevřít projekt…"
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        do {
+            let data = try Data(contentsOf: url)
+            let snapshot = try JSONDecoder().decode(SHProjectSnapshot.self, from: data)
+            config.inputFolder = snapshot.inputFolder
+            config.outputFolder = snapshot.outputFolder
+            config.cacheFolder = snapshot.cacheFolder
+            config.promptFolder = snapshot.promptFolder
+            config.selectedInferenceModel = snapshot.selectedInferenceModel
+            config.selectedEmbeddingModel = snapshot.selectedEmbeddingModel
+            config.selectedRerankerModel = snapshot.selectedRerankerModel
+            config.selectedOCRModel = snapshot.selectedOCRModel
+            config.extractionMode = snapshot.extractionMode
+            config.currentPrompt = snapshot.currentPrompt
+            config.lastLoadedPromptName = snapshot.lastLoadedPromptName
+            invalidateCachedDocumentsIfInputChanged()
+            refreshInputFolderStats()
+            scheduleConflictUpdate(after: 0)
+            persistAll()
+            statusText = "Projekt načten: \(url.lastPathComponent)"
+            return url
+        } catch {
+            statusText = "Otevření projektu selhalo: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
     // MARK: – Recent folders
 
     /// Records `path` as the most recent entry for `kind`. Deduplicates
@@ -1306,6 +1410,23 @@ final class SHAppViewModel {
     /// standard macOS dialog the user can accept or deny; we never block
     /// on the answer.
     private func requestNotificationAuthorizationIfNeeded() {
+        // Register the completion category up front so a notification posted
+        // immediately after authorization includes the action button. macOS
+        // attaches actions to a notification by category id, and the
+        // category must be set before `add(request:)` is called.
+        let openOutputAction = UNNotificationAction(
+            identifier: SHCompletionNotification.openOutputActionID,
+            title: "Otevřít výstup",
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: SHCompletionNotification.categoryID,
+            actions: [openOutputAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
             // Intentionally ignored: a denied prompt simply means the
             // completion banner stays the only feedback channel.
@@ -1314,6 +1435,9 @@ final class SHAppViewModel {
 
     private func postCompletionNotification(for outcome: SHRunOutcome) {
         let content = UNMutableNotificationContent()
+        // Set categoryIdentifier so the system attaches the "Otevřít
+        // výstup" action button defined in `setNotificationCategories`.
+        content.categoryIdentifier = SHCompletionNotification.categoryID
         switch outcome {
         case .success:
             content.title = "Spice Harvester: hotovo"
@@ -1876,4 +2000,13 @@ final class SHAppViewModel {
         loggerOutputPath = output.path
         return newLogger
     }
+}
+
+/// Identifier constants for the completion notification category and its
+/// action buttons. Producer (`postCompletionNotification`) and consumer
+/// (`SHNotificationDelegate`) both reference these strings, so they live
+/// in one place.
+enum SHCompletionNotification {
+    static let categoryID = "DavidMasin.SpiceHarvester.completion"
+    static let openOutputActionID = "OPEN_OUTPUT"
 }

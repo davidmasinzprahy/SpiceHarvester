@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import UserNotifications
 
 @main
 struct SpiceHarvesterApp: App {
@@ -69,6 +70,26 @@ struct SpiceHarvesterApp: App {
                 }
                 .keyboardShortcut("?", modifiers: .command)
             }
+
+            // File → Save / Open project: pragmatic stand-in for full
+            // DocumentGroup migration. Saves a JSON snapshot of folders +
+            // server selection + prompt + mode; loading restores those
+            // fields without disturbing global server registry or perf
+            // tuning. See `SHAppViewModel.SHProjectSnapshot`.
+            CommandGroup(after: .saveItem) {
+                Divider()
+                Button("Uložit projekt jako…") {
+                    _ = vm.saveProjectAs()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(vm.isRunning)
+
+                Button("Otevřít projekt…") {
+                    _ = vm.openProject()
+                }
+                .keyboardShortcut("o", modifiers: .command)
+                .disabled(vm.isRunning)
+            }
         }
 
         Settings {
@@ -81,7 +102,7 @@ struct SpiceHarvesterApp: App {
 /// work area so the app avoids an initial vertical scrollbar whenever the
 /// current display has enough room; on large screens only the width is capped
 /// to the UI's natural working size.
-final class SHAppDelegate: NSObject, NSApplicationDelegate {
+final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private let compactPreferredWidth: CGFloat = 1200
     private let largePreferredWidth: CGFloat = 1320
     private let largeScreenWidthThreshold: CGFloat = 1440
@@ -93,11 +114,49 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate {
     private let mainWindowAutosaveName = "SpiceHarvesterMainWindow"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Become the notification delegate so we can respond to action
+        // buttons ("Otevřít výstup") on completion notifications. Without
+        // a delegate, the notification UI shows but tapping the action
+        // is a no-op.
+        UNUserNotificationCenter.current().delegate = self
+
         // SwiftUI creates its window slightly after `applicationDidFinishLaunching`;
         // hop one run loop tick so `NSApp.mainWindow` / `NSApp.windows` is populated.
         DispatchQueue.main.async { [weak self] in
             self?.resizeMainWindowForCurrentScreen()
         }
+    }
+
+    // MARK: – UNUserNotificationCenterDelegate
+
+    /// Show the notification banner even when the app is in the foreground.
+    /// Default macOS behavior suppresses banners for the active app — but
+    /// for long batch runs the user is often in another app at completion
+    /// time and we want consistent UX regardless of focus state.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    /// Handle the user clicking the "Otevřít výstup" action button on a
+    /// completion notification. Bridge through `SHIntentNotifications`
+    /// (already used by AppIntents) so we have one observer hook in the
+    /// view-model — no need for a separate UNUserNotificationCenter
+    /// observer there.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        defer { completionHandler() }
+        guard response.actionIdentifier == SHCompletionNotification.openOutputActionID else {
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        NotificationCenter.default.post(name: SHIntentNotifications.openOutput, object: nil)
     }
 
     @MainActor

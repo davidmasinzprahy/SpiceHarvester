@@ -17,6 +17,12 @@ struct ContentView: View {
     /// Honors System Settings → Accessibility → Display → Reduce motion. Used
     /// to skip the header logo wobble for users who explicitly opted out.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// SwiftUI-provided UndoManager wired into the responder chain. Cmd+Z
+    /// when the main window is key dispatches to whichever NSUndoManager
+    /// the focused view's environment provides; using the SwiftUI value
+    /// keeps registration consistent across cells without us managing
+    /// the stack manually.
+    @Environment(\.undoManager) private var undoManager
     /// Optional case-insensitive substring filter applied to the log card. Empty
     /// = show all lines. Lives on the view (not the view model) because filtering
     /// is purely a presentation concern — the on-disk log is unchanged.
@@ -124,6 +130,16 @@ struct ContentView: View {
         .onDisappear { removeTabKeyMonitor() }
         .onChange(of: vm.config.inputFolder) { _, _ in
             vm.refreshInputFolderStats()
+        }
+        .onChange(of: vm.isRunning) { _, isNow in
+            // Auto-collapse fullscreen prompt when a run starts so the
+            // user doesn't lose visibility of Progress + Log during the
+            // run. Reverse direction (run ends) is intentionally not
+            // restored — once the run finishes the user wants to see
+            // results, not be thrown back into edit mode.
+            if isNow && promptFullscreen {
+                promptFullscreen = false
+            }
         }
         .sheet(isPresented: $showHelp) {
             HelpSheet(dismiss: { showHelp = false })
@@ -293,6 +309,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .tint(.red)
                 .focused($focus, equals: .cancel)
+                .modifier(VisibleFocusRing(isFocused: focus == .cancel))
                 .help("Přeruší aktuálně běžící úlohu (Cmd+.)")
             } else {
                 Button {
@@ -305,6 +322,7 @@ struct ContentView: View {
                 .tint(.blue)
                 .disabled(!vm.canRunAll)
                 .focused($focus, equals: .run)
+                .modifier(VisibleFocusRing(isFocused: focus == .run))
                 .help(vm.missingRequirementsHint
                       ?? "Spustí kompletní pipeline: předzpracování + extrakci (Cmd+R)")
             }
@@ -318,7 +336,13 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(!vm.canOpenOutput)
             .focused($focus, equals: .output)
-            .help("Otevřít složku výstupu ve Finderu (Cmd+Shift+O)")
+            .modifier(VisibleFocusRing(isFocused: focus == .output))
+            // Drag-out source: drag the Output button onto Finder, Slack
+            // or Mail to grab the whole output folder as a file
+            // representation. SwiftUI's `.draggable` produces a system-
+            // standard NSItemProvider with the folder URL.
+            .draggable(URL(fileURLWithPath: vm.config.outputFolder))
+            .help("Otevřít složku výstupu ve Finderu (Cmd+Shift+O) · drag → Finder / Slack / Mail")
 
             Button {
                 showHelp = true
@@ -328,9 +352,35 @@ struct ContentView: View {
             .labelStyle(.titleAndIcon)
             .buttonStyle(.bordered)
             .focused($focus, equals: .help)
+            .modifier(VisibleFocusRing(isFocused: focus == .help))
             .help("Otevřít nápovědu (Cmd+?)")
         }
         .frame(minHeight: 40)
+    }
+
+    /// Snapshot the current prompt, ask the view-model to clear it, and
+    /// register an undo handler that restores the snapshot. Symmetric
+    /// redo is also wired so the user can Cmd+Shift+Z back to empty.
+    /// Cmd+Z is the canonical undo gesture; without this the only way
+    /// to recover after Vymazat was to retype the prompt from scratch.
+    private func clearPromptWithUndo() {
+        let snapshot = vm.config.currentPrompt
+        vm.clearPrompt()
+        guard let undoManager else { return }
+        let viewModel = vm
+        undoManager.registerUndo(withTarget: viewModel) { target in
+            // Restore the cleared prompt. Re-register a redo handler so
+            // Cmd+Shift+Z bounces it back to empty — needed for the
+            // user's mental model of "undo / redo are inverse".
+            let redoSnapshot = target.config.currentPrompt
+            target.config.currentPrompt = snapshot
+            target.persistAllDebounced()
+            undoManager.registerUndo(withTarget: target) { target in
+                target.config.currentPrompt = redoSnapshot
+                target.persistAllDebounced()
+            }
+        }
+        undoManager.setActionName("Vymazat prompt")
     }
 
     /// True when the currently-selected server's Base URL parses as an
@@ -362,6 +412,47 @@ struct ContentView: View {
         let trimmed = firstLine.trimmingCharacters(in: .whitespaces)
         if trimmed.count <= 48 { return trimmed }
         return String(trimmed.prefix(45)) + "…"
+    }
+
+    /// Wraps a focusable button in a more visible accent ring than
+    /// macOS' default thin blue outline. The default focus ring is
+    /// nearly invisible against `.regularMaterial` cards in Light mode
+    /// — power users navigating with Tab kept losing track of which
+    /// control was focused. Adding a 2 pt accent border at 60 % opacity
+    /// when focused gives unmistakable signal without changing button
+    /// dimensions.
+    private struct VisibleFocusRing: ViewModifier {
+        let isFocused: Bool
+
+        func body(content: Content) -> some View {
+            content
+                .overlay {
+                    if isFocused {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 2)
+                            .padding(-2)
+                            .transition(.opacity)
+                            .allowsHitTesting(false)
+                    }
+                }
+        }
+    }
+
+    /// Conditionally attaches a `.draggable` source for the output folder.
+    /// `isSuccess == false` returns the content untouched — banner-as-drag
+    /// only makes sense after a successful run when there's something to
+    /// share.
+    private struct CompletionDragModifier: ViewModifier {
+        let isSuccess: Bool
+        let outputPath: String
+
+        func body(content: Content) -> some View {
+            if isSuccess && !outputPath.isEmpty {
+                content.draggable(URL(fileURLWithPath: outputPath))
+            } else {
+                content
+            }
+        }
     }
 
     /// Tiny pill-shaped affordance that signals "this edge is draggable".
@@ -1017,6 +1108,7 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .tint(.green)
             .focused($focus, equals: .verifyServer)
+            .modifier(VisibleFocusRing(isFocused: focus == .verifyServer))
             .help("Server byl úspěšně ověřen v této session. Klikni pro nové ověření.")
         } else {
             Button {
@@ -1028,6 +1120,7 @@ struct ContentView: View {
             .tint(.blue)
             .disabled(!vm.canVerifyServer)
             .focused($focus, equals: .verifyServer)
+            .modifier(VisibleFocusRing(isFocused: focus == .verifyServer))
             .help("Zkontrolovat spojení a načíst seznam modelů")
         }
     }
@@ -1120,6 +1213,7 @@ struct ContentView: View {
             .tint(.blue)
             .disabled(!vm.canLoadPrompts)
             .focused($focus, equals: .loadPrompts)
+            .modifier(VisibleFocusRing(isFocused: focus == .loadPrompts))
             .help("Načte .md prompty ze složky Prompty")
 
             // Recent prompts the user actually committed to running. Acts as
@@ -1190,7 +1284,8 @@ struct ContentView: View {
 
             // Toggle for "give me the whole right column for editing".
             // Icon flips based on state so the button reads as a toggle,
-            // not a one-shot action.
+            // not a one-shot action. Disabled during runs so the user
+            // can't accidentally hide live Progress + Log mid-pipeline.
             Button {
                 promptFullscreen.toggle()
             } label: {
@@ -1200,9 +1295,12 @@ struct ContentView: View {
             }
             .buttonStyle(.borderless)
             .tint(.blue)
-            .help(promptFullscreen
-                  ? "Zmenšit prompt zpět (vrátí Průběh a Log)"
-                  : "Roztáhnout prompt na celý pravý sloupec")
+            .disabled(vm.isRunning)
+            .help(vm.isRunning
+                  ? "Při běhu pipeline nelze měnit (uvidíš Průběh a Log)"
+                  : (promptFullscreen
+                     ? "Zmenšit prompt zpět (vrátí Průběh a Log)"
+                     : "Roztáhnout prompt na celý pravý sloupec"))
             .accessibilityLabel(promptFullscreen ? "Zmenšit prompt" : "Roztáhnout prompt")
 
             if !vm.config.currentPrompt.isEmpty {
@@ -1211,20 +1309,22 @@ struct ContentView: View {
                 } label: {
                     Label("Vymazat", systemImage: "xmark.circle")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
                 .focused($focus, equals: .clearPrompt)
-                .help("Smaže obsah promptu — vyžaduje potvrzení.")
+                .help("Smaže obsah promptu — vyžaduje potvrzení (Cmd+Z = obnovit).")
                 .confirmationDialog(
                     "Opravdu vymazat prompt?",
                     isPresented: $showClearPromptConfirm,
                     titleVisibility: .visible
                 ) {
                     Button("Vymazat", role: .destructive) {
-                        vm.clearPrompt()
+                        clearPromptWithUndo()
                     }
                     Button("Zrušit", role: .cancel) { }
                 } message: {
-                    Text("Prompt obsahuje \(vm.config.currentPrompt.count) znaků. Vymazání nelze vrátit zpět.")
+                    Text("Prompt obsahuje \(vm.config.currentPrompt.count) znaků. Cmd+Z obnoví.")
                 }
             }
         }
@@ -1271,6 +1371,11 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(tint.opacity(0.35), lineWidth: 0.5)
         )
+        // Combine icon + title + message into one VoiceOver element so
+        // screen readers announce the banner as a unit ("Upozornění:
+        // mode mismatch — popis"), not 4 disjoint pieces.
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(conflict.actionLabel.map { "Akce: \($0)" } ?? "")
         .confirmationDialog(
             pendingConflict?.title ?? "",
             isPresented: Binding(
@@ -1338,6 +1443,18 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(tint.opacity(0.35), lineWidth: 0.5)
         )
+        // After a successful run, drag the banner to share the output
+        // folder. .cancelled / .failed don't carry useful data, so the
+        // drag source is gated on success.
+        .modifier(CompletionDragModifier(
+            isSuccess: completion == .success,
+            outputPath: vm.config.outputFolder
+        ))
+        // Same accessibility composition as conflictBanner — VoiceOver
+        // hears one unit ("Hotovo. Potvrdit") instead of icon, title and
+        // button as separate stops.
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isStaticText)
     }
 
     // MARK: – Progress
@@ -1805,39 +1922,54 @@ struct ContentView: View {
 
     // MARK: – Status bar
 
+    /// True while the bottom status bar should occupy its full 34 pt of
+    /// vertical chrome. Collapses to zero height when status is the
+    /// trivial "Připraveno" default — the run-row pill in the left
+    /// column is already showing identical info, so the duplicated bar
+    /// is wasted space at the bottom of the window.
+    private var statusBarShouldShow: Bool {
+        if vm.isRunning { return true }
+        let trimmed = vm.statusText.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && trimmed != "Připraveno"
+    }
+
+    @ViewBuilder
     private var statusBar: some View {
-        ZStack {
-            Color.clear
-            HStack(alignment: .center, spacing: 8) {
-                Group {
-                    if vm.isRunning {
-                        ProgressView().controlSize(.mini)
-                            .accessibilityLabel("Probíhá zpracování")
-                    } else {
-                        Circle()
-                            .fill(.green)
-                            .frame(width: 8, height: 8)
-                            .accessibilityLabel("Připraveno")
+        if statusBarShouldShow {
+            ZStack {
+                Color.clear
+                HStack(alignment: .center, spacing: 8) {
+                    Group {
+                        if vm.isRunning {
+                            ProgressView().controlSize(.mini)
+                                .accessibilityLabel("Probíhá zpracování")
+                        } else {
+                            Circle()
+                                .fill(.green)
+                                .frame(width: 8, height: 8)
+                                .accessibilityLabel("Připraveno")
+                        }
                     }
+                    .frame(width: 12, height: 12)
+                    // Selectable so the user can copy a long error message
+                    // straight from the status bar — previously they'd have to
+                    // hunt the same line in the Log card and select it there.
+                    Text(vm.statusText)
+                        .font(.body)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                        .accessibilityLabel("Stav: \(vm.statusText)")
+                        .help(vm.statusText)
+                    Spacer()
                 }
-                .frame(width: 12, height: 12)
-                // Selectable so the user can copy a long error message
-                // straight from the status bar — previously they'd have to
-                // hunt the same line in the Log card and select it there.
-                Text(vm.statusText)
-                    .font(.body)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                    .accessibilityLabel("Stav: \(vm.statusText)")
-                    .help(vm.statusText)
-                Spacer()
+                .padding(.horizontal, 12)
             }
-            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34)
+            .background(.thinMaterial)
+            .overlay(Divider(), alignment: .top)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
-        .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34)
-        .background(.thinMaterial)
-        .overlay(Divider(), alignment: .top)
     }
 }
 
