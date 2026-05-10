@@ -672,7 +672,19 @@ final class SHAppViewModel {
     /// from home every time. Session-only; not persisted.
     private var lastPickedFolderParent: URL?
 
-    init() {
+    /// How aggressively this view-model persists changes back to
+    /// UserDefaults. Primary windows use `.persistent` (the default,
+    /// behavior pre-multi-window), scratch windows opened via Cmd+Shift+N
+    /// use `.scratch` so two windows don't fight over the same UserDefaults
+    /// key on every keystroke.
+    enum PersistenceMode {
+        case persistent
+        case scratch
+    }
+    private let persistenceMode: PersistenceMode
+
+    init(persistenceMode: PersistenceMode = .persistent) {
+        self.persistenceMode = persistenceMode
         self.servers = serverStore.loadServers()
 
         // Every launch starts with a clean slate. Only the local AI server registry
@@ -703,8 +715,11 @@ final class SHAppViewModel {
         }
 
         // Persist cleared state right away so stale paths/bookmarks don't linger in
-        // UserDefaults between launches.
-        configStore.save(config)
+        // UserDefaults between launches. Scratch windows skip — they have
+        // no business overwriting the primary window's persisted slot.
+        if persistenceMode == .persistent {
+            configStore.save(config)
+        }
 
         // Build the OpenAI-compatible client with the persisted timeout preference (so the
         // user's last chosen value is in effect immediately, not only after they
@@ -914,7 +929,15 @@ final class SHAppViewModel {
     func persistAll() {
         persistDebounceTask?.cancel()
         persistDebounceTask = nil
-        configStore.save(config)
+        // Scratch windows skip the global config write so secondary
+        // windows don't overwrite the primary's saved state. Server
+        // registry changes still go through — a new server added in
+        // a scratch window stays available everywhere, which matches
+        // the user's mental model ("servers are global"). To save a
+        // scratch window's config the user uses Uložit projekt jako…
+        if persistenceMode == .persistent {
+            configStore.save(config)
+        }
         serverStore.saveServers(servers)
     }
 
@@ -924,6 +947,8 @@ final class SHAppViewModel {
     private var persistDebounceTask: Task<Void, Never>?
     func persistAllDebounced(delayMs: Int = 300) {
         persistDebounceTask?.cancel()
+        // Scratch windows: skip debounced writes too. Same reasoning.
+        guard persistenceMode == .persistent else { return }
         persistDebounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
             guard !Task.isCancelled else { return }

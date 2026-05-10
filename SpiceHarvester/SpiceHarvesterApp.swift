@@ -12,14 +12,20 @@ import UserNotifications
 @main
 struct SpiceHarvesterApp: App {
     @NSApplicationDelegateAdaptor(SHAppDelegate.self) var appDelegate
-    /// Single source of truth for both the main window and the Settings scene.
-    /// Hoisted to App level so the Settings sheet (Cmd+,) sees the same state
-    /// the main window does.
+    /// Primary window's view-model + help-sheet flag. Settings scene shares
+    /// this instance so changes in the Settings sheet (Cmd+,) reflect in the
+    /// primary window's runtime state. Secondary scratch windows (Cmd+Shift+N)
+    /// have their own per-window view-model so configurations don't fight
+    /// over the same UserDefaults slot.
     @State private var vm = SHAppViewModel()
     @State private var showHelp = false
+    /// Environment hook to open the secondary "scratch" window from menu
+    /// commands. Only available macOS 13+, which is below our deployment
+    /// target so no @available guard needed.
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             ContentView(vm: vm, showHelp: $showHelp)
         }
         // `.defaultSize` is the SwiftUI fallback for first-launch dimensions; the
@@ -118,12 +124,54 @@ struct SpiceHarvesterApp: App {
                 }
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(vm.isRunning)
+
+                Divider()
+
+                // Multi-window — opens a *scratch* secondary window with
+                // its own view-model. Differences vs the primary window:
+                //   - Doesn't persist config to UserDefaults (would clash
+                //     with primary's slot — last write wins is confusing).
+                //   - Server registry, recents, and prompt history are
+                //     loaded from UserDefaults at init so the user has
+                //     access to their saved servers, but changes don't
+                //     write back.
+                //   - Closing the scratch window discards its config;
+                //     persistence is via `Uložit projekt jako…` only.
+                // Pragmatic stand-in for full DocumentGroup migration —
+                // see `docs/P2_BACKLOG_DEFERRED.md`.
+                Button("Nové okno") {
+                    openWindow(id: "scratch", value: UUID())
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
             }
         }
 
         Settings {
             SettingsView(vm: vm)
         }
+
+        // Scratch / secondary window. Each open creates a fresh window
+        // with its own ContentView + view-model (see SHScratchRoot)
+        // because WindowGroup(for: UUID.self) emits one window per
+        // unique value.
+        WindowGroup(id: "scratch", for: UUID.self) { _ in
+            SHScratchRoot()
+        }
+        .defaultSize(width: 1180, height: 980)
+    }
+}
+
+/// Hosts a scratch ContentView with its own view-model. Doesn't persist
+/// config back to UserDefaults — see the rationale on the `Nové okno`
+/// menu item. Help sheet flag is local because the primary window's
+/// help-flag would be a coordination headache across windows for no
+/// real benefit (each window can show its own help if requested).
+struct SHScratchRoot: View {
+    @State private var vm = SHAppViewModel(persistenceMode: .scratch)
+    @State private var showHelp = false
+
+    var body: some View {
+        ContentView(vm: vm, showHelp: $showHelp)
     }
 }
 

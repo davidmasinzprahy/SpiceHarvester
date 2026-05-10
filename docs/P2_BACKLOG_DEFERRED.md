@@ -4,6 +4,19 @@ Tento soubor dokumentuje P2 položky z [auditu](../README.md), které **vědomě
 odkládáme** mimo aktuální implementační rozsah. Pro každou je sepsaný plán
 implementace, scope a očekávaný čas. Slouží jako vstup pro budoucí ticket.
 
+## Status (aktuální stav)
+
+| Položka | Stav |
+|---|---|
+| Lokalizace (String Catalog) | ✅ Hotovo |
+| AppIntents pro Shortcuts | ✅ Hotovo |
+| Save / Load Project commands (interim za DocumentGroup) | ✅ Hotovo |
+| Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo (minimal) |
+| Quick Look provider source | 🟡 Source ready, target chybí |
+| Quick Look Preview Extension target | 📋 Vyžaduje Xcode IDE (#1 níže) |
+| Plný DocumentGroup s file-based persistencí | 📋 3-day refactor (#3 níže) |
+| iCloud Drive sync | 📋 Vyžaduje Apple Dev account (#2 níže) |
+
 ## 1. Quick Look provider pro výstupní JSON
 
 ### Co a proč
@@ -11,6 +24,14 @@ Spice Harvester ukládá per-document `*.json` a `*_raw.json` do výstupní slo�
 Ve Finderu Quick Look (Space-press) momentálně ukáže raw JSON text. Vlastní
 Quick Look provider by mohl renderovat hezky strukturovaný náhled
 (patient_name, lab_values jako tabulka, atd.).
+
+### Stav: source ready, target chybí
+
+Provider zdroj je už checkin za `#if QUICK_LOOK_EXTENSION` guard v
+[SHQuickLookPreview.swift](../SpiceHarvester/QuickLook/SHQuickLookPreview.swift).
+Renderuje strukturovanou HTML tabulku z canonického SHExtractionResult JSONu,
+escape-safe pro source_file (XSS guard), dark-mode aware. Stačí přidat
+samotný Xcode target a soubor do něj zařadit.
 
 ### Proč odloženo
 **Vyžaduje samostatný Xcode target** — `Quick Look Preview Extension`. To je
@@ -165,6 +186,26 @@ možnost je ručně přepínat config nebo spustit více instancí přes hack.
   document souboru.
 - **Server registry** musí zůstat globální (login credentials per-doc je
   out of scope).
+
+### Aktuální interim řešení (≈ 80 % užitku)
+
+Místo plné DocumentGroup migrace je nyní implementováno:
+
+1. **Save / Load Project** přes File menu (Cmd+Shift+S / Cmd+O) — JSON
+   snapshot folderů, modelů, promptu, mode. Server registry intentionally
+   not included (kept globally). Viz `SHProjectSnapshot` v `SHAppViewModel.swift`.
+2. **Multi-window** přes `WindowGroup(id: "scratch", for: UUID.self)` —
+   Cmd+Shift+N otevře novou scratch window s vlastním view-modelem.
+   Scratch persistence mode: skipuje `configStore.save` (nepřepisuje
+   primary window's slot), ale server registry sdílí. Pro persistování
+   scratch konfigu uživatel použije Uložit projekt jako…
+
+**Co interim NEzvládá oproti plné DocumentGroup:**
+- Žádný File → Open Recent (každé otevření přes panel)
+- Žádný drag .spiceharvester soubor na app icon
+- Žádný iCloud Drive auto-sync
+- Migrace existing UserDefaults config nepotřebuje žádnou — primary window
+  načítá UserDefaults dál jako vždy
 
 ### Odhad
 - Refactor SHAppViewModel split: **1 den**
