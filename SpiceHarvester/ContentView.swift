@@ -41,6 +41,14 @@ struct ContentView: View {
     /// risk that a confirmation dialog removes.
     @State private var showClearPromptConfirm: Bool = false
 
+    /// True while the Prompt card is expanded to fill the entire right
+    /// column, hiding Progress + Log temporarily. For long prompts (500+
+    /// lines, schema templates) the default 50/50 split is too cramped to
+    /// edit comfortably; toggle hides Progress + Log until the user
+    /// finishes editing. State is view-local because it's purely a
+    /// presentation toggle, not run-affecting config.
+    @State private var promptFullscreen: Bool = false
+
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
@@ -67,23 +75,31 @@ struct ContentView: View {
                 // duration of the session.
                 VStack(alignment: .leading, spacing: 10) {
                     notificationStack
-                    VSplitView {
-                        // Vertical insets on each pane create a visible gap
-                        // around the resize handle, plus a tiny "grip" pill
-                        // overlay tells the user the divider is draggable.
-                        // Without the grip, hover-only discoverability is
-                        // poor — many users never realize the panes resize.
+                    if promptFullscreen {
+                        // Edit-focused mode: Prompt takes the whole right
+                        // column, Progress + Log temporarily disappear so
+                        // a long prompt has full vertical space.
                         promptsCard
-                            .padding(.bottom, 5)
-                            .overlay(alignment: .bottom) { dragHandleGrip }
-                            .frame(minHeight: 170, idealHeight: 290, maxHeight: .infinity)
-                        progressStatusCard
-                            .padding(.vertical, 5)
-                            .overlay(alignment: .bottom) { dragHandleGrip }
-                            .frame(minHeight: 80, idealHeight: 120)
-                        logCard
-                            .padding(.top, 5)
-                            .frame(minHeight: 150, idealHeight: 250, maxHeight: .infinity)
+                            .frame(maxHeight: .infinity)
+                    } else {
+                        VSplitView {
+                            // Vertical insets on each pane create a visible gap
+                            // around the resize handle, plus a tiny "grip" pill
+                            // overlay tells the user the divider is draggable.
+                            // Without the grip, hover-only discoverability is
+                            // poor — many users never realize the panes resize.
+                            promptsCard
+                                .padding(.bottom, 5)
+                                .overlay(alignment: .bottom) { dragHandleGrip }
+                                .frame(minHeight: 170, idealHeight: 290, maxHeight: .infinity)
+                            progressStatusCard
+                                .padding(.vertical, 5)
+                                .overlay(alignment: .bottom) { dragHandleGrip }
+                                .frame(minHeight: 80, idealHeight: 120)
+                            logCard
+                                .padding(.top, 5)
+                                .frame(minHeight: 150, idealHeight: 250, maxHeight: .infinity)
+                        }
                     }
                 }
                 .padding(14)
@@ -317,6 +333,24 @@ struct ContentView: View {
         .frame(minHeight: 40)
     }
 
+    /// True when the currently-selected server's Base URL parses as an
+    /// `http(s)://host…` URL. Used to surface a small warning glyph next
+    /// to the URL field; an empty URL is treated as "in progress, not
+    /// invalid" so we don't shout at the user the moment they tap into
+    /// an empty server slot.
+    private var isCurrentBaseURLValid: Bool {
+        guard vm.servers.indices.contains(vm.selectedServerIndex) else { return true }
+        let raw = vm.servers[vm.selectedServerIndex].baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return true }
+        guard let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else {
+            return false
+        }
+        return true
+    }
+
     /// First non-empty line of a history entry, capped at 48 chars. Menu
     /// items can't safely show 200-char prompts; this surfaces the
     /// recognizable "title" most users put on their prompt's first line.
@@ -353,12 +387,15 @@ struct ContentView: View {
     /// full vertical room.
     @ViewBuilder
     private var notificationStack: some View {
-        if vm.lastCompletion != nil || !vm.parameterConflicts.isEmpty {
+        if vm.lastCompletion != nil || !vm.displayedConflicts.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 if let completion = vm.lastCompletion {
                     completionBanner(completion)
                 }
-                ForEach(Array(vm.parameterConflicts.enumerated()), id: \.offset) { _, conflict in
+                // `displayedConflicts` is debounced — see `scheduleConflictUpdate`.
+                // Direct read of `parameterConflicts` flickered as the analyzer
+                // re-evaluated keyword matches mid-keystroke.
+                ForEach(Array(vm.displayedConflicts.enumerated()), id: \.offset) { _, conflict in
                     conflictBanner(conflict)
                 }
             }
@@ -489,11 +526,23 @@ struct ContentView: View {
     // MARK: – Runtime actions
 
     private var statusIndicator: some View {
-        HStack(spacing: 8) {
+        // Three visual states packed into one pill:
+        //  • running → blue spinner + status text
+        //  • verified server gone unreachable → red dot + "Server odpojen"
+        //  • everything else → green dot + ready/ready-to-go text
+        let unreachable = vm.isSelectedServerVerified && !vm.isVerifiedServerReachable
+        return HStack(spacing: 8) {
             if vm.isRunning {
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 10, height: 10)
+            } else if unreachable {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .frame(width: 10, height: 10)
+                    .symbolRenderingMode(.hierarchical)
+                    .accessibilityLabel("Server odpojen")
             } else {
                 Image(systemName: "circle.fill")
                     .font(.system(size: 9))
@@ -501,9 +550,9 @@ struct ContentView: View {
                     .frame(width: 10, height: 10)
                     .accessibilityHidden(true)
             }
-            Text(vm.toolbarReadyText)
+            Text(unreachable ? "Server odpojen" : vm.toolbarReadyText)
                 .font(.body)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(unreachable ? .red : .secondary)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
@@ -586,7 +635,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     folderRow(icon: "tray.and.arrow.down.fill", label: "Vstup",
                               path: vm.config.inputFolder, action: vm.chooseInputFolder,
-                              focusField: .inputFolder,
+                              focusField: .inputFolder, kind: .input,
                               onDrop: { vm.config.inputFolder = $0; vm.persistAllDebounced() })
                     if let chip = vm.inputFolderChipLabel {
                         inputFolderChip(chip)
@@ -594,15 +643,15 @@ struct ContentView: View {
                 }
                 folderRow(icon: "tray.and.arrow.up.fill", label: "Výstup",
                           path: vm.config.outputFolder, action: vm.chooseOutputFolder,
-                          focusField: .outputFolder,
+                          focusField: .outputFolder, kind: .output,
                           onDrop: { vm.config.outputFolder = $0; vm.persistAllDebounced() })
                 folderRow(icon: "externaldrive.fill", label: "Cache",
                           path: vm.config.cacheFolder, action: vm.chooseCacheFolder,
-                          focusField: .cacheFolder,
+                          focusField: .cacheFolder, kind: .cache,
                           onDrop: { vm.config.cacheFolder = $0; vm.persistAllDebounced() })
                 folderRow(icon: "doc.text.fill", label: "Prompty (.md)",
                           path: vm.config.promptFolder, action: vm.choosePromptFolder,
-                          focusField: .promptFolder,
+                          focusField: .promptFolder, kind: .prompt,
                           onDrop: { vm.config.promptFolder = $0; vm.persistAllDebounced() })
             }
             // If the user manually replaces the input folder (e.g. via drop),
@@ -650,6 +699,7 @@ struct ContentView: View {
         path: String,
         action: @escaping () -> Void,
         focusField: SHFocusField,
+        kind: SHFolderKind,
         onDrop: @escaping (String) -> Void
     ) -> some View {
         let isSelected = !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -691,17 +741,63 @@ struct ContentView: View {
                 return true
             }
 
-            Button {
-                action()
-            } label: {
-                Text(isSelected ? "Změnit" : "Vybrat")
-                    .frame(minWidth: 64)
+            // Combined primary-action Menu: clicking the body opens the
+            // standard NSOpenPanel; clicking the chevron reveals the
+            // recents list. When no recents exist we fall back to a plain
+            // Button so the chevron doesn't read as "there's something
+            // here" when there isn't.
+            let recents = vm.recents(for: kind)
+            if recents.isEmpty {
+                Button {
+                    action()
+                } label: {
+                    Text(isSelected ? "Změnit" : "Vybrat")
+                        .frame(minWidth: 64)
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+                .focused($focus, equals: focusField)
+                .help(isSelected ? "Vybrat jinou složku" : "Vybrat složku ve Finderu")
+            } else {
+                Menu {
+                    Button(isSelected ? "Vybrat jinou složku…" : "Vybrat složku…") {
+                        action()
+                    }
+                    Divider()
+                    Section("Naposledy") {
+                        ForEach(recents, id: \.self) { recent in
+                            Button {
+                                vm.selectRecentFolder(recent, kind: kind)
+                            } label: {
+                                Text(recentFolderMenuLabel(recent))
+                            }
+                        }
+                    }
+                } label: {
+                    Text(isSelected ? "Změnit" : "Vybrat")
+                        .frame(minWidth: 64)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.visible)
+                .controlSize(.regular)
+                .frame(maxWidth: 96)
+                .focused($focus, equals: focusField)
+                .help("Otevři výběr složky nebo vyber z naposledy použitých")
             }
-            .buttonStyle(.bordered)
-            .tint(.blue)
-            .focused($focus, equals: focusField)
-            .help(isSelected ? "Vybrat jinou složku" : "Vybrat složku ve Finderu")
         }
+    }
+
+    /// Trim a recents path for menu display. Full filesystem paths
+    /// would overflow the menu width; we show the last 2 components
+    /// (`Documents/medical` instead of `/Users/x/.../medical`) which is
+    /// usually enough to recognize the project.
+    private func recentFolderMenuLabel(_ path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        let components = url.pathComponents.filter { $0 != "/" }
+        if components.count <= 2 {
+            return path
+        }
+        return ".../" + components.suffix(2).joined(separator: "/")
     }
 
     // MARK: – Server / Modely a režim
@@ -736,7 +832,10 @@ struct ContentView: View {
 
                 modeRow
             }
-            .onChange(of: vm.config.extractionMode) { _, _ in vm.persistAll() }
+            .onChange(of: vm.config.extractionMode) { _, _ in
+                vm.persistAll()
+                vm.scheduleConflictUpdate(after: 0)
+            }
         }
     }
 
@@ -802,15 +901,29 @@ struct ContentView: View {
             ))
             .textFieldStyle(.roundedBorder)
 
-            TextField("Base URL (např. http://localhost:1234/v1 nebo http://localhost:8000/v1)", text: Binding(
-                get: { vm.servers[vm.selectedServerIndex].baseURL },
-                set: {
-                    vm.servers[vm.selectedServerIndex].baseURL = $0
-                    vm.serverConnectionDetailsChanged()
+            HStack(spacing: 6) {
+                TextField("Base URL (např. http://localhost:1234/v1 nebo http://localhost:8000/v1)", text: Binding(
+                    get: { vm.servers[vm.selectedServerIndex].baseURL },
+                    set: {
+                        vm.servers[vm.selectedServerIndex].baseURL = $0
+                        vm.serverConnectionDetailsChanged()
+                    }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+
+                // Inline validation indicator so a malformed URL surfaces
+                // before the user clicks Ověřit (which fails after a
+                // multi-second connection timeout). Empty input is OK
+                // (placeholder phase); only flag actual non-empty malformed.
+                if !isCurrentBaseURLValid {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .symbolRenderingMode(.hierarchical)
+                        .help("URL musí začínat http:// nebo https:// a obsahovat host (např. http://localhost:1234/v1).")
                 }
-            ))
-            .textFieldStyle(.roundedBorder)
-            .font(.system(.body, design: .monospaced))
+            }
 
             SecureField("API Key (volitelné)", text: Binding(
                 get: { vm.servers[vm.selectedServerIndex].apiKey },
@@ -990,6 +1103,7 @@ struct ContentView: View {
             }
             .onChange(of: vm.config.currentPrompt) { _, _ in
                 vm.persistAllDebounced()
+                vm.scheduleConflictUpdate()
             }
             .frame(maxHeight: .infinity, alignment: .top)
         }
@@ -1073,6 +1187,23 @@ struct ContentView: View {
             }
 
             Spacer()
+
+            // Toggle for "give me the whole right column for editing".
+            // Icon flips based on state so the button reads as a toggle,
+            // not a one-shot action.
+            Button {
+                promptFullscreen.toggle()
+            } label: {
+                Image(systemName: promptFullscreen
+                      ? "arrow.down.right.and.arrow.up.left"
+                      : "arrow.up.left.and.arrow.down.right")
+            }
+            .buttonStyle(.borderless)
+            .tint(.blue)
+            .help(promptFullscreen
+                  ? "Zmenšit prompt zpět (vrátí Průběh a Log)"
+                  : "Roztáhnout prompt na celý pravý sloupec")
+            .accessibilityLabel(promptFullscreen ? "Zmenšit prompt" : "Roztáhnout prompt")
 
             if !vm.config.currentPrompt.isEmpty {
                 Button(role: .destructive) {
@@ -1356,12 +1487,51 @@ struct ContentView: View {
                 Text(state.etaHuman)
                     .font(.caption.monospacedDigit().weight(.medium))
                 Spacer()
+                // Live throughput badge: rolling per-second + per-document
+                // averages so the user can spot pipeline slowdown (KV cache
+                // pressure, OS swap) without staring at the ETA shifting.
+                if let throughput = throughputLabel(state: state, elapsed: elapsed) {
+                    Label(throughput, systemImage: "gauge.with.dots.needle.bottom.50percent")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
 
             currentlyProcessingRow(state: state)
 
             healthRow(health: health, silent: silent)
         }
+    }
+
+    /// Rolling throughput label for the active phase. Picks the right
+    /// counter (cachedDocs in preprocessing, completed in extraction) and
+    /// shows it as docs/min plus per-doc average, e.g. "12,3 dok/min · ⌀
+    /// 4,8 s/dok". Returns `nil` until the pipeline has finished its first
+    /// document — average speed during the warm-up second is meaningless.
+    private func throughputLabel(state: SHProgressViewState, elapsed: Double) -> String? {
+        let done: Int
+        switch state.phase {
+        case .preprocessing: done = state.counters.cachedDocs
+        case .extraction:    done = state.extractionProgressCompleted
+        case .idle, .finished: return nil
+        }
+        guard done > 0, elapsed > 1 else { return nil }
+        let perDoc = elapsed / Double(done)
+        let perMin = Double(done) / (elapsed / 60.0)
+        let perDocLabel: String = {
+            if perDoc < 1 {
+                return String(format: "%.0f ms/dok", perDoc * 1000)
+            }
+            if perDoc < 10 {
+                return String(format: "%.1f s/dok", perDoc)
+            }
+            return "\(Int(perDoc.rounded())) s/dok"
+        }()
+        let perMinLabel = perMin >= 100
+            ? "\(Int(perMin.rounded())) dok/min"
+            : String(format: "%.1f dok/min", perMin)
+        return "\(perMinLabel) · ⌀ \(perDocLabel)"
     }
 
     /// Per-item activity line under the ETA row. Lists up to ~3 file names that
@@ -1651,11 +1821,16 @@ struct ContentView: View {
                     }
                 }
                 .frame(width: 12, height: 12)
+                // Selectable so the user can copy a long error message
+                // straight from the status bar — previously they'd have to
+                // hunt the same line in the Log card and select it there.
                 Text(vm.statusText)
                     .font(.body)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .textSelection(.enabled)
                     .accessibilityLabel("Stav: \(vm.statusText)")
+                    .help(vm.statusText)
                 Spacer()
             }
             .padding(.horizontal, 12)

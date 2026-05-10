@@ -56,6 +56,12 @@ struct SHSetupStep: Identifiable, Sendable {
     let isDone: Bool
 }
 
+/// Categorical key for the folder Recents store. Stable raw values so
+/// UserDefaults keys don't drift if we add new folder slots later.
+enum SHFolderKind: String, Codable, Hashable, CaseIterable, Sendable {
+    case input, output, cache, prompt
+}
+
 @MainActor
 @Observable
 final class SHAppViewModel {
@@ -105,16 +111,32 @@ final class SHAppViewModel {
     var promptHistory: [String] = []
     static let promptHistoryLimit: Int = 8
 
+    /// Recent paths picked / dropped into each folder slot. Keyed by the
+    /// folder kind (`SHFolderKind`) and persisted so users can hop between
+    /// 2-3 active projects without re-navigating Finder each time. Most
+    /// recent first, deduped, capped at `recentFoldersLimit`.
+    var recentFolders: [SHFolderKind: [String]] = [:]
+    static let recentFoldersLimit: Int = 5
+
     /// Is the currently selected server's last verification still valid?
     var isSelectedServerVerified: Bool {
         guard let id = verifiedServerID, let current = selectedServer else { return false }
         return id == current.id
     }
 
+    /// Whether the most recent ambient health check succeeded. Defaults to
+    /// true and only flips false after at least one ambient ping fails on
+    /// a verified server. Drives a red tint on the run-row status pill so
+    /// the user sees that LM Studio crashed mid-session before they click
+    /// Run and wait through a full HTTP timeout.
+    var isVerifiedServerReachable: Bool = true
+
     /// Invalidate the "verified" badge whenever the server's identity or credentials
     /// change (URL or API key edit, server switch, etc.).
     func invalidateServerVerification() {
         verifiedServerID = nil
+        isVerifiedServerReachable = true
+        stopServerHealthWatcher()
     }
 
     // MARK: – Can-run predicates
@@ -273,6 +295,31 @@ final class SHAppViewModel {
     }
 
     // MARK: – Parameter / prompt conflict detection
+
+    /// Debounced snapshot of `parameterConflicts` shown in the UI. Direct
+    /// observation of `parameterConflicts` would re-render the banner on
+    /// every keystroke (the analyzer scans the prompt for keywords and
+    /// changes its verdict mid-word: "consol" → no match, "consolidate"
+    /// → match), which produced visible flicker. The view reads this
+    /// instead and `scheduleConflictUpdate()` syncs it 400 ms after the
+    /// last change.
+    var displayedConflicts: [SHParameterConflict] = []
+    private var conflictDebounceTask: Task<Void, Never>?
+
+    /// Schedules an update of `displayedConflicts` to the current value of
+    /// `parameterConflicts` after a debounce window. Called from view-model
+    /// setters that affect conflict detection (prompt edits, mode picker,
+    /// embedding model picker). Repeated calls cancel the previous wait
+    /// and start a new one — classic trailing-edge debounce.
+    func scheduleConflictUpdate(after delayMs: Int = 400) {
+        conflictDebounceTask?.cancel()
+        let snapshotDelay = UInt64(max(0, delayMs)) * 1_000_000
+        conflictDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: snapshotDelay)
+            guard !Task.isCancelled, let self else { return }
+            self.displayedConflicts = self.parameterConflicts
+        }
+    }
 
     /// All currently-active conflicts between `config` and `config.currentPrompt`.
     /// Rendered as banners in the UI. Recomputed via `@Observable` tracking whenever
@@ -494,6 +541,11 @@ final class SHAppViewModel {
     /// scan — switching folders rapidly would otherwise let an old scan
     /// finish and overwrite stats for the new folder.
     private var inputFolderScanTask: Task<Void, Never>?
+    /// Background ping loop that re-checks `/v1/models` every 30 s while
+    /// a server is verified. Cancelled when the user invalidates the
+    /// server (URL edit, server switch) — `invalidateServerVerification`
+    /// stops it and `verifyServer` restarts it on success.
+    private var serverHealthTask: Task<Void, Never>?
     /// True for the brief window where a task is about to start – guards against
     /// back-to-back clicks racing past the `isRunning` flag.
     private var runEntered: Bool = false
@@ -550,6 +602,20 @@ final class SHAppViewModel {
         // per `promptHistoryLimit`, anything beyond is silently truncated.
         if let saved = UserDefaults.standard.array(forKey: Self.promptHistoryKey) as? [String] {
             self.promptHistory = Array(saved.prefix(Self.promptHistoryLimit))
+        }
+
+        // Seed displayedConflicts so the banner reflects the initial state
+        // even before the user touches anything (search-mode-without-embedding
+        // matters from the moment the app opens with that config).
+        self.displayedConflicts = self.parameterConflicts
+
+        // Restore recent folders for each slot. Stored per-kind so a power
+        // user with separate prompt / output projects keeps both lists.
+        for kind in SHFolderKind.allCases {
+            let key = Self.recentFolderKey(for: kind)
+            if let saved = UserDefaults.standard.array(forKey: key) as? [String] {
+                self.recentFolders[kind] = Array(saved.prefix(Self.recentFoldersLimit))
+            }
         }
 
         // Flush any pending debounced persist when the app is about to terminate.
@@ -646,6 +712,7 @@ final class SHAppViewModel {
         config.selectedEmbeddingModel = model
         persistAllDebounced()
         validateSelectedEmbeddingModel()
+        scheduleConflictUpdate(after: 0)
     }
 
     func setRerankerModel(_ model: String) {
@@ -723,24 +790,27 @@ final class SHAppViewModel {
     }
 
     func chooseInputFolder() {
-        pickFolder(into: \.inputFolder) {
+        pickFolder(into: \.inputFolder, kind: .input) {
             self.invalidateCachedDocumentsIfInputChanged()
             self.refreshInputFolderStats()
         }
     }
-    func chooseOutputFolder() { pickFolder(into: \.outputFolder) }
-    func chooseCacheFolder() { pickFolder(into: \.cacheFolder) }
-    func choosePromptFolder() { pickFolder(into: \.promptFolder) }
+    func chooseOutputFolder() { pickFolder(into: \.outputFolder, kind: .output) }
+    func chooseCacheFolder() { pickFolder(into: \.cacheFolder, kind: .cache) }
+    func choosePromptFolder() { pickFolder(into: \.promptFolder, kind: .prompt) }
 
     /// Opens the folder picker and, on success, writes the chosen path into
-    /// `config[keyPath:]`, stores its security-scoped bookmark, and persists.
-    /// `onChange` fires after the write, for side effects like cache invalidation.
+    /// `config[keyPath:]`, stores its security-scoped bookmark, records
+    /// the path in the per-kind Recents store, and persists. `onChange`
+    /// fires after the write, for side effects like cache invalidation.
     private func pickFolder(into keyPath: WritableKeyPath<SHAppConfig, String>,
+                            kind: SHFolderKind,
                             onChange: (() -> Void)? = nil) {
         let currentValue = config[keyPath: keyPath]
         guard let url = chooseFolder(relativeTo: currentValue) else { return }
         config[keyPath: keyPath] = url.path
         storeBookmark(for: url)
+        rememberRecentFolder(url.path, kind: kind)
         persistAll()
         onChange?()
     }
@@ -898,15 +968,58 @@ final class SHAppViewModel {
             }
 
             verifiedServerID = server.id
+            isVerifiedServerReachable = true
             persistAll()
             statusText = "Server dostupný · modely: \(models.count)\(contextSuffix)"
             validateSelectedEmbeddingModel()
+            startServerHealthWatcher()
         } catch {
             if verifiedServerID == server.id {
                 verifiedServerID = nil
             }
+            isVerifiedServerReachable = true
+            stopServerHealthWatcher()
             statusText = "Ověření selhalo: \(error.localizedDescription)"
         }
+    }
+
+    /// Starts (or restarts) a background loop that pings `/v1/models`
+    /// every 30 s while a server is verified. The first failure flips
+    /// `isVerifiedServerReachable` to `false`, the run-row pill goes
+    /// red, and the user finds out *before* they click Run and burn
+    /// 30 s on a doomed HTTP timeout. Subsequent successes restore the
+    /// flag silently.
+    private func startServerHealthWatcher() {
+        stopServerHealthWatcher()
+        let serverID = verifiedServerID
+        serverHealthTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if Task.isCancelled { return }
+                guard let self else { return }
+                // Only ping while the server we started for is still
+                // the verified one. Server switch / invalidation cancels
+                // this task in `invalidateServerVerification`, but a
+                // race-window check makes the loop robust.
+                guard self.verifiedServerID == serverID,
+                      let server = self.selectedServer else { return }
+                do {
+                    _ = try await self.lmClient.fetchModels(server)
+                    if !Task.isCancelled, self.verifiedServerID == serverID {
+                        self.isVerifiedServerReachable = true
+                    }
+                } catch {
+                    if !Task.isCancelled, self.verifiedServerID == serverID {
+                        self.isVerifiedServerReachable = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopServerHealthWatcher() {
+        serverHealthTask?.cancel()
+        serverHealthTask = nil
     }
 
     /// Pick the most relevant loaded model from LM Studio's response:
@@ -1012,6 +1125,57 @@ final class SHAppViewModel {
     }
 
     private static let promptHistoryKey = "SHPromptHistory"
+
+    // MARK: – Recent folders
+
+    /// Records `path` as the most recent entry for `kind`. Deduplicates
+    /// (a path that's already on the list moves to the top instead of
+    /// being added twice) and caps the list at `recentFoldersLimit`.
+    /// Persisted to UserDefaults under a per-kind key.
+    private func rememberRecentFolder(_ path: String, kind: SHFolderKind) {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var list = recentFolders[kind] ?? []
+        list.removeAll { $0 == trimmed }
+        list.insert(trimmed, at: 0)
+        if list.count > Self.recentFoldersLimit {
+            list.removeLast(list.count - Self.recentFoldersLimit)
+        }
+        recentFolders[kind] = list
+        UserDefaults.standard.set(list, forKey: Self.recentFolderKey(for: kind))
+    }
+
+    /// Recents for a given slot, freshest first. Empty when the user has
+    /// never picked a folder of that kind. The current value is *not*
+    /// filtered out — picking the same folder again is fine, just visible.
+    func recents(for kind: SHFolderKind) -> [String] {
+        recentFolders[kind] ?? []
+    }
+
+    /// Public hand-off used by folder rows when the user chooses an entry
+    /// from the Recents menu. Mirrors what `pickFolder` does after
+    /// `NSOpenPanel` returns: writes the path, refreshes scope-dependent
+    /// caches, persists.
+    func selectRecentFolder(_ path: String, kind: SHFolderKind) {
+        switch kind {
+        case .input:
+            config.inputFolder = path
+            invalidateCachedDocumentsIfInputChanged()
+            refreshInputFolderStats()
+        case .output:
+            config.outputFolder = path
+        case .cache:
+            config.cacheFolder = path
+        case .prompt:
+            config.promptFolder = path
+        }
+        rememberRecentFolder(path, kind: kind)
+        persistAll()
+    }
+
+    private static func recentFolderKey(for kind: SHFolderKind) -> String {
+        "SHRecentFolders.\(kind.rawValue)"
+    }
 
     func runExtraction() async {
         await executeRun {

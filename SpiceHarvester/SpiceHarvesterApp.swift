@@ -86,6 +86,11 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate {
     private let largePreferredWidth: CGFloat = 1320
     private let largeScreenWidthThreshold: CGFloat = 1440
     private let largeScreenHeightThreshold: CGFloat = 1100
+    /// AppKit's autosave key for the main window frame. Once a frame has
+    /// been written under this name (Cocoa stores it in NSGlobalDomain
+    /// under `NSWindow Frame {key}`), `setFrameUsingName` restores it on
+    /// future launches — so the user's manual resize / move sticks.
+    private let mainWindowAutosaveName = "SpiceHarvesterMainWindow"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // SwiftUI creates its window slightly after `applicationDidFinishLaunching`;
@@ -104,6 +109,18 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate {
             ?? NSApp.windows.first
         guard let window, let screen = window.screen ?? NSScreen.main else { return }
         window.titleVisibility = .hidden
+
+        // Hook the window into AppKit's frame autosave system. After this
+        // call, every subsequent move / resize is persisted, and the next
+        // launch will read it back automatically. Whether we found a
+        // saved frame determines if we apply the first-launch defaults
+        // below — re-running our centering logic on every launch would
+        // override the user's manual placement.
+        let didRestore = window.setFrameUsingName(mainWindowAutosaveName)
+        window.setFrameAutosaveName(mainWindowAutosaveName)
+        if didRestore {
+            return
+        }
 
         let visible = screen.visibleFrame  // excludes menu bar & Dock in Cocoa coordinates
 
@@ -128,5 +145,8 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate {
         )
 
         window.setFrame(newFrame, display: true, animate: false)
+        // Save the first-launch frame immediately so a quick quit-relaunch
+        // doesn't lose it (autosave is normally written on resize / close).
+        window.saveFrame(usingName: mainWindowAutosaveName)
     }
 }

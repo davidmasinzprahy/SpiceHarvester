@@ -64,16 +64,62 @@ struct SHLogTextView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let textView = scroll.documentView as? NSTextView else { return }
         if textView.string != text {
-            // `setString` clobbers the whole text — for incremental updates
-            // we'd need a smarter diff, but the log is rewritten by the
-            // owner on phase boundaries, so this is fine in practice.
-            textView.string = text
+            // Build an attributed string that color-codes log lines by
+            // severity (ERROR red, WARNING orange, INFO secondary, default
+            // primary). The base log format is `[ts] [LEVEL] file phase: msg`,
+            // so a regex on the bracketed `LEVEL` token is sufficient.
+            // Cost is O(n) per refresh; the log is rewritten on phase
+            // boundaries, not per-line, so this isn't on the hot path.
+            let attributed = Self.attributedLog(text, fontSize: fontSize)
+            textView.textStorage?.setAttributedString(attributed)
             if autoScrollToBottom && context.coordinator.userPinnedToBottom {
                 textView.scrollRangeToVisible(NSRange(location: (text as NSString).length, length: 0))
             }
         }
         // Rebuild font in case Dynamic Type / system size changes between updates.
         textView.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    }
+
+    /// Builds an `NSAttributedString` from a raw log dump. Each line is
+    /// scanned for a severity token (`[ERROR]`, `[WARNING]`, `[INFO]`)
+    /// and the *whole* line is colored accordingly so the user can skim
+    /// for problems without reading every character. Lines without a
+    /// recognized token use `labelColor` (default primary).
+    private static func attributedLog(_ text: String, fontSize: CGFloat) -> NSAttributedString {
+        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let result = NSMutableAttributedString(
+            string: text,
+            attributes: [.font: font, .foregroundColor: NSColor.labelColor]
+        )
+        let nsText = text as NSString
+        var lineStart = 0
+        while lineStart < nsText.length {
+            let lineRange = nsText.lineRange(for: NSRange(location: lineStart, length: 0))
+            let line = nsText.substring(with: lineRange) as String
+            if let color = severityColor(for: line) {
+                result.addAttribute(.foregroundColor, value: color, range: lineRange)
+            }
+            lineStart = NSMaxRange(lineRange)
+        }
+        return result
+    }
+
+    /// Maps a log line to its accent color. Tokens are matched
+    /// case-insensitively and bracketed (`[ERROR]`) so fragments inside
+    /// extracted JSON like `"warning"` don't accidentally re-color
+    /// payload lines.
+    private static func severityColor(for line: String) -> NSColor? {
+        let upper = line.uppercased()
+        if upper.contains("[ERROR]") || upper.contains("[FATAL]") {
+            return .systemRed
+        }
+        if upper.contains("[WARNING]") || upper.contains("[WARN]") {
+            return .systemOrange
+        }
+        if upper.contains("[INFO]") || upper.contains("[DEBUG]") {
+            return .secondaryLabelColor
+        }
+        return nil
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
