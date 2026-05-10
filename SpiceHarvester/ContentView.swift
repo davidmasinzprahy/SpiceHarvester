@@ -51,6 +51,8 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     header
                     leftConfigurationCards
+                    Divider().opacity(0.4)
+                    runRow
                 }
                 .padding(14)
                 .frame(minWidth: 460, idealWidth: 540)
@@ -107,7 +109,6 @@ struct ContentView: View {
         .onChange(of: vm.config.inputFolder) { _, _ in
             vm.refreshInputFolderStats()
         }
-        .toolbar { windowToolbar }
         .sheet(isPresented: $showHelp) {
             HelpSheet(dismiss: { showHelp = false })
         }
@@ -255,41 +256,26 @@ struct ContentView: View {
 
     // MARK: – Window toolbar
 
-    /// macOS window toolbar: status indicator on the left, Run/Stop +
-    /// Output + Help on the right. Run as the rightmost (primary) action
-    /// matches Xcode's pattern and AppKit's `NSToolbarItem.Identifier`
-    /// convention. The bottom-of-left-column run row was removed when
-    /// these moved to the toolbar — Run is one of the most-clicked
-    /// controls in the app and belongs in the persistent chrome.
-    @ToolbarContentBuilder
-    private var windowToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
+    /// Bottom-of-left-column run bar: status pill on the left, the action
+    /// trio (Spustit / Výstup / Nápověda) on the right. Compared to the
+    /// window toolbar variant, putting the buttons here gives them full
+    /// label+icon (`.titleAndIcon`) treatment that's more legible than the
+    /// icon-only toolbar compression macOS applies on narrower windows.
+    /// "Setup happens here, run happens here" reads as one column instead
+    /// of forcing the eye to jump between top toolbar and content.
+    private var runRow: some View {
+        HStack(spacing: 10) {
             statusIndicator
-        }
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button {
-                showHelp = true
-            } label: {
-                Label("Nápověda", systemImage: "questionmark.circle")
-            }
-            .focused($focus, equals: .help)
-            .help("Otevřít nápovědu (Cmd+?)")
-
-            Button {
-                vm.openOutput()
-            } label: {
-                Label("Výstup", systemImage: "folder")
-            }
-            .disabled(!vm.canOpenOutput)
-            .focused($focus, equals: .output)
-            .help("Otevřít složku výstupu ve Finderu (Cmd+Shift+O)")
-
+            Spacer()
             if vm.isRunning {
                 Button(role: .destructive) {
                     vm.cancelRun()
                 } label: {
                     Label("Přerušit", systemImage: "stop.circle.fill")
                 }
+                .labelStyle(.titleAndIcon)
+                .buttonStyle(.bordered)
+                .tint(.red)
                 .focused($focus, equals: .cancel)
                 .help("Přeruší aktuálně běžící úlohu (Cmd+.)")
             } else {
@@ -298,12 +284,37 @@ struct ContentView: View {
                 } label: {
                     Label("Spustit", systemImage: "play.fill")
                 }
+                .labelStyle(.titleAndIcon)
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
                 .disabled(!vm.canRunAll)
                 .focused($focus, equals: .run)
                 .help(vm.missingRequirementsHint
                       ?? "Spustí kompletní pipeline: předzpracování + extrakci (Cmd+R)")
             }
+
+            Button {
+                vm.openOutput()
+            } label: {
+                Label("Výstup", systemImage: "folder")
+            }
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.bordered)
+            .disabled(!vm.canOpenOutput)
+            .focused($focus, equals: .output)
+            .help("Otevřít složku výstupu ve Finderu (Cmd+Shift+O)")
+
+            Button {
+                showHelp = true
+            } label: {
+                Label("Nápověda", systemImage: "questionmark.circle")
+            }
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.bordered)
+            .focused($focus, equals: .help)
+            .help("Otevřít nápovědu (Cmd+?)")
         }
+        .frame(minHeight: 40)
     }
 
     /// First non-empty line of a history entry, capped at 48 chars. Menu
