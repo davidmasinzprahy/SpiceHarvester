@@ -25,22 +25,24 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                // Left: configuration the user sets up *before* a run (folders,
-                // server, model). Onboarding lives here too — it points at these
-                // cards, so being above them is the natural reading order.
+                // Left: configuration + run controls. Configuration cards stack
+                // top-down; the toolbar (status + Spustit/Výstup/Nápověda) sits
+                // at the bottom so "set things up here, then run from here"
+                // reads as one visually grouped column.
                 VStack(alignment: .leading, spacing: 10) {
                     header
                     leftConfigurationCards
+                    Divider().opacity(0.4)
+                    runtimeHeaderSpacer
                 }
                 .padding(14)
                 .frame(minWidth: 460, idealWidth: 540)
 
-                // Right: workspace. The Prompt editor is the artifact the user
-                // iterates on most often, so it lives in the larger workspace
-                // column above progress + log. Banners stack right under the
-                // toolbar so anything needing attention shows up first.
+                // Right: pure workspace + monitoring. The Prompt editor owns
+                // the prime vertical space; banners stack right above it and
+                // Progress + Log sit below. With Run/Stop moved to the left
+                // column, this column has zero chrome — just content.
                 VStack(alignment: .leading, spacing: 10) {
-                    runtimeHeaderSpacer
                     notificationStack
                     promptsCard
                         .frame(minHeight: 240, maxHeight: .infinity)
@@ -289,8 +291,12 @@ struct ContentView: View {
         }
     }
 
-    /// Keeps runtime actions above the Progress card while preserving the right
-    /// column's vertical alignment with the configuration column header.
+    /// Bottom-of-left-column run bar: status indicator on the left, the action
+    /// trio (Spustit / Výstup / Nápověda) on the right. The whole row is
+    /// pinned to the bottom of the configuration column so "set up here, run
+    /// here" forms a single visual flow without scattering controls across
+    /// the window. Name kept for git-blame continuity even though the row
+    /// is no longer a "header spacer".
     private var runtimeHeaderSpacer: some View {
         HStack {
             statusIndicator
