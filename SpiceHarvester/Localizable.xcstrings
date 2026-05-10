@@ -453,6 +453,97 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Last: %@" } }
       }
+    },
+
+    "Otevřít projekt…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Project…" } }
+      }
+    },
+    "Uložit projekt jako…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save Project As…" } }
+      }
+    },
+    "Otevřít výstup" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Output" } }
+      }
+    },
+    "Server dostupný · modely: %lld" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server reachable · models: %lld" } }
+      }
+    },
+    "Vlastnosti projektu" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Project properties" } }
+      }
+    },
+    "Projekt načten: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Project loaded: %@" } }
+      }
+    },
+    "Projekt uložen: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Project saved: %@" } }
+      }
+    },
+    "Otevření projektu selhalo: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open project failed: %@" } }
+      }
+    },
+    "Uložení projektu selhalo: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save project failed: %@" } }
+      }
+    },
+    "Projekt načten · %lld složek vyžaduje re-pick" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Project loaded · %lld folder(s) require re-pick" } }
+      }
+    },
+    "Rozumím" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "OK" } }
+      }
+    },
+    "Naposledy spuštěné prompty (max %lld)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Recently run prompts (max %lld)" } }
+      }
+    },
+    "Roztáhnout prompt na celý pravý sloupec" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expand prompt across the whole right column" } }
+      }
+    },
+    "Zmenšit prompt zpět (vrátí Průběh a Log)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shrink prompt (restore Progress and Log)" } }
+      }
+    },
+    "Při běhu pipeline nelze měnit (uvidíš Průběh a Log)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Locked while the pipeline runs (so Progress and Log stay visible)" } }
+      }
+    },
+    "Smaže obsah promptu — vyžaduje potvrzení (Cmd+Z = obnovit)." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear prompt — requires confirmation (Cmd+Z to restore)." } }
+      }
+    },
+    "Prompt obsahuje %lld znaků. Cmd+Z obnoví." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Prompt contains %lld characters. Cmd+Z restores." } }
+      }
+    },
+    "Otevřít složku výstupu ve Finderu (Cmd+Shift+O) · drag → Finder / Slack / Mail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open output in Finder (Cmd+Shift+O) · drag → Finder / Slack / Mail" } }
+      }
     }
   }
 }

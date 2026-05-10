@@ -113,6 +113,16 @@ struct ContentView: View {
             }
             statusBar
         }
+        // Animates statusBar's appearance/disappearance via the
+        // `.transition` modifier inside `statusBar` body. Without an
+        // ambient `.animation(_:value:)` here the transition is a
+        // no-op — SwiftUI only animates view inserts/removes when a
+        // parent declares an animation tied to the relevant value.
+        .animation(.easeOut(duration: 0.20), value: statusBarShouldShow)
+        // Focus ring overlays use `.transition(.opacity)` — same story
+        // as statusBar: needs an ambient animation tied to the focus
+        // state to actually fade in/out instead of popping.
+        .animation(.easeInOut(duration: 0.12), value: focus)
         .frame(minWidth: 940, minHeight: 660)
         // Honor the user's Dynamic Type preference but clamp it: dense
         // dashboards break above accessibility3 (text wraps cards into
@@ -340,8 +350,11 @@ struct ContentView: View {
             // Drag-out source: drag the Output button onto Finder, Slack
             // or Mail to grab the whole output folder as a file
             // representation. SwiftUI's `.draggable` produces a system-
-            // standard NSItemProvider with the folder URL.
-            .draggable(URL(fileURLWithPath: vm.config.outputFolder))
+            // standard NSItemProvider with the folder URL. Conditional
+            // wrapping (only when path is set AND exists) — without it
+            // dragging from an empty/missing path would deliver a
+            // ghost URL pointing at root or a non-existent path.
+            .modifier(OutputDragModifier(outputPath: vm.config.outputFolder))
             .help("Otevřít složku výstupu ve Finderu (Cmd+Shift+O) · drag → Finder / Slack / Mail")
 
             Button {
@@ -359,26 +372,39 @@ struct ContentView: View {
     }
 
     /// Snapshot the current prompt, ask the view-model to clear it, and
-    /// register an undo handler that restores the snapshot. Symmetric
-    /// redo is also wired so the user can Cmd+Shift+Z back to empty.
+    /// register an undo handler that restores the snapshot. NSUndoManager
+    /// auto-flips the registration into "redo" mode while it's running an
+    /// undo callback, so calling the SAME helper from inside the closure
+    /// gives us symmetric undo/redo with no manual stack juggling.
     /// Cmd+Z is the canonical undo gesture; without this the only way
     /// to recover after Vymazat was to retype the prompt from scratch.
     private func clearPromptWithUndo() {
         let snapshot = vm.config.currentPrompt
         vm.clearPrompt()
+        registerPromptReplacement(replacing: "", with: snapshot)
+    }
+
+    /// Registers an undo (or redo, depending on which phase NSUndoManager
+    /// is in) for a `currentPrompt` value swap. Recursion via
+    /// `registerPromptReplacement(replacing:with:)` is the standard
+    /// idiom — when the user invokes Cmd+Z, NSUndoManager runs the
+    /// closure inside a redo-registration scope, so the next call lands
+    /// on the redo stack automatically.
+    private func registerPromptReplacement(replacing oldValue: String, with newValue: String) {
         guard let undoManager else { return }
-        let viewModel = vm
-        undoManager.registerUndo(withTarget: viewModel) { target in
-            // Restore the cleared prompt. Re-register a redo handler so
-            // Cmd+Shift+Z bounces it back to empty — needed for the
-            // user's mental model of "undo / redo are inverse".
-            let redoSnapshot = target.config.currentPrompt
-            target.config.currentPrompt = snapshot
+        // ContentView is a struct, so we can't `[weak self]` — but
+        // SwiftUI views are value types whose lifetime is rebuilt every
+        // body() pass anyway. The captured `self` snapshot is safe
+        // because the only mutable state we touch (`vm`, `undoManager`)
+        // lives in references the snapshot holds.
+        let view = self
+        undoManager.registerUndo(withTarget: vm) { target in
+            target.config.currentPrompt = newValue
             target.persistAllDebounced()
-            undoManager.registerUndo(withTarget: target) { target in
-                target.config.currentPrompt = redoSnapshot
-                target.persistAllDebounced()
-            }
+            // Re-register the inverse swap. NSUndoManager is now in
+            // redo-registration mode (we're inside an undo callback),
+            // so this lands on the redo stack — Cmd+Shift+Z replays it.
+            view.registerPromptReplacement(replacing: newValue, with: oldValue)
         }
         undoManager.setActionName("Vymazat prompt")
     }
@@ -441,18 +467,47 @@ struct ContentView: View {
     /// Conditionally attaches a `.draggable` source for the output folder.
     /// `isSuccess == false` returns the content untouched — banner-as-drag
     /// only makes sense after a successful run when there's something to
-    /// share.
+    /// share. Also guards on filesystem existence so we don't deliver a
+    /// stale URL when the user has since deleted / moved the folder.
     private struct CompletionDragModifier: ViewModifier {
         let isSuccess: Bool
         let outputPath: String
 
         func body(content: Content) -> some View {
-            if isSuccess && !outputPath.isEmpty {
+            if isSuccess, ContentView.isUsableFolderPath(outputPath) {
                 content.draggable(URL(fileURLWithPath: outputPath))
             } else {
                 content
             }
         }
+    }
+
+    /// Same conditional drag wrapper as CompletionDragModifier but for
+    /// the Output button in the run row. Splitting them keeps the
+    /// success gating explicit on the banner — the button is draggable
+    /// any time the folder is set and exists, even before any run.
+    private struct OutputDragModifier: ViewModifier {
+        let outputPath: String
+
+        func body(content: Content) -> some View {
+            if ContentView.isUsableFolderPath(outputPath) {
+                content.draggable(URL(fileURLWithPath: outputPath))
+            } else {
+                content
+            }
+        }
+    }
+
+    /// Folder path is "usable" for drag if it's non-empty and points at
+    /// an actual directory on disk. `URL(fileURLWithPath:)` doesn't
+    /// validate so an explicit `FileManager` probe is the only safe way
+    /// to keep ghost URLs out of the drag pasteboard.
+    fileprivate static func isUsableFolderPath(_ path: String) -> Bool {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: trimmed, isDirectory: &isDir)
+        return exists && isDir.boolValue
     }
 
     /// Tiny pill-shaped affordance that signals "this edge is draggable".
@@ -878,17 +933,19 @@ struct ContentView: View {
         }
     }
 
-    /// Trim a recents path for menu display. Full filesystem paths
-    /// would overflow the menu width; we show the last 2 components
-    /// (`Documents/medical` instead of `/Users/x/.../medical`) which is
-    /// usually enough to recognize the project.
+    /// Trim a recents path for menu display. Uses macOS' standard
+    /// tilde abbreviation so `/Users/david/Documents/medical` reads as
+    /// `~/Documents/medical` — same convention as Finder, NSOpenPanel
+    /// recents, and the rest of the system. Falls back to mid-truncation
+    /// for paths outside `$HOME` when they're too long for the menu.
     private func recentFolderMenuLabel(_ path: String) -> String {
-        let url = URL(fileURLWithPath: path)
-        let components = url.pathComponents.filter { $0 != "/" }
-        if components.count <= 2 {
-            return path
-        }
-        return ".../" + components.suffix(2).joined(separator: "/")
+        let abbreviated = (path as NSString).abbreviatingWithTildeInPath
+        if abbreviated.count <= 48 { return abbreviated }
+        // Hard truncation for absurdly long paths (deeply nested,
+        // sandbox container references). Keep tail: the project /
+        // folder name is usually the meaningful part.
+        let suffix = String(abbreviated.suffix(45))
+        return "…" + suffix
     }
 
     // MARK: – Server / Modely a režim
@@ -1926,11 +1983,11 @@ struct ContentView: View {
     /// vertical chrome. Collapses to zero height when status is the
     /// trivial "Připraveno" default — the run-row pill in the left
     /// column is already showing identical info, so the duplicated bar
-    /// is wasted space at the bottom of the window.
+    /// is wasted space at the bottom of the window. Idle detection is
+    /// delegated to the view-model's `isStatusIdle` flag so there's no
+    /// string compare in the view layer.
     private var statusBarShouldShow: Bool {
-        if vm.isRunning { return true }
-        let trimmed = vm.statusText.trimmingCharacters(in: .whitespaces)
-        return !trimmed.isEmpty && trimmed != "Připraveno"
+        vm.isRunning || !vm.isStatusIdle
     }
 
     @ViewBuilder

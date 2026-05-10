@@ -85,7 +85,8 @@ struct SpiceHarvesterApp: App {
                 .disabled(vm.isRunning)
 
                 Button("Otevřít projekt…") {
-                    _ = vm.openProject()
+                    let outcome = vm.openProject()
+                    SHAppDelegate.handleOpenProjectOutcome(outcome)
                 }
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(vm.isRunning)
@@ -102,6 +103,38 @@ struct SpiceHarvesterApp: App {
 /// work area so the app avoids an initial vertical scrollbar whenever the
 /// current display has enough room; on large screens only the width is capped
 /// to the UI's natural working size.
+/// User-facing alert for the `openProject` outcomes that need
+/// explanation. `success` and `cancelled` paths fall through silently
+/// (statusBar already carries the success message). The "needs repick"
+/// case is the important one: project file holds path strings but the
+/// sandbox bookmarks for those paths weren't in the registry, so the
+/// user must re-Vybrat them via the folder rows before Run will work.
+@MainActor
+extension SHAppDelegate {
+    static func handleOpenProjectOutcome(_ outcome: SHOpenProjectOutcome) {
+        switch outcome {
+        case .success, .cancelled:
+            return
+        case .successNeedsRepick(_, let stalePaths):
+            let alert = NSAlert()
+            alert.messageText = "Projekt načten — některé složky vyžadují opětovný výběr"
+            alert.informativeText = """
+            macOS sandbox vyžaduje, abys cesty z projektu znovu vybral přes tlačítko „Vybrat" u každé složky. Bez toho aplikace nedostane přístup k souborům.
+
+            Cesty bez přístupu:
+            \(stalePaths.map { "• \($0)" }.joined(separator: "\n"))
+            """
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Rozumím")
+            alert.runModal()
+        case .failed(let error):
+            let alert = NSAlert(error: error)
+            alert.messageText = "Otevření projektu selhalo"
+            alert.runModal()
+        }
+    }
+}
+
 final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private let compactPreferredWidth: CGFloat = 1200
     private let largePreferredWidth: CGFloat = 1320

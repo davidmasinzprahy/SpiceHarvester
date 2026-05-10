@@ -67,9 +67,14 @@ final class SHQuickLookPreview: QLPreviewProvider, QLPreviewingController {
             rows.append(rowHTML(key: key, value: json[key] ?? "—"))
         }
 
-        let title = (json["source_file"] as? String) ?? "Spice Harvester result"
+        // `source_file` is user-controlled (filename of the source PDF),
+        // so we MUST html-escape before injecting into <title> / <h1>.
+        // Without this, a filename like `evil<script>...</script>.pdf`
+        // executes from file:// origin in WebKit (XSS risk specific to
+        // Quick Look previews).
+        let rawTitle = (json["source_file"] as? String) ?? "Spice Harvester result"
         let body = "<table>\(rows.joined())</table>"
-        return defaultHTML(title: title, body: body)
+        return defaultHTML(title: rawTitle, body: body)
     }
 
     private static func rowHTML(key: String, value: Any) -> String {
@@ -94,8 +99,13 @@ final class SHQuickLookPreview: QLPreviewProvider, QLPreviewingController {
     }
 
     private static func defaultHTML(title: String, body: String) -> String {
-        """
-        <!doctype html><html><head><meta charset="utf-8"><title>\(title)</title>
+        // Escape title at every injection point. Body is built up of
+        // already-escaped row fragments (see `rowHTML`), so it doesn't
+        // get re-escaped here — escaping pre-escaped content would
+        // produce visible `&amp;lt;` instead of `<`.
+        let safeTitle = escape(title)
+        return """
+        <!doctype html><html><head><meta charset="utf-8"><title>\(safeTitle)</title>
         <style>
         body{font:13px -apple-system,system-ui;margin:18px;color:#222}
         h1{font-size:16px;margin:0 0 12px;color:#444}
@@ -110,7 +120,7 @@ final class SHQuickLookPreview: QLPreviewProvider, QLPreviewingController {
           th,td{border-color:#333}
         }
         </style></head>
-        <body><h1>\(title)</h1>\(body)</body></html>
+        <body><h1>\(safeTitle)</h1>\(body)</body></html>
         """
     }
 }

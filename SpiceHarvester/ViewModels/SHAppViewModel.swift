@@ -62,6 +62,72 @@ enum SHFolderKind: String, Codable, Hashable, CaseIterable, Sendable {
     case input, output, cache, prompt
 }
 
+/// Snapshot of everything that defines a "project" — folders, server
+/// selection, model picks, prompt, mode. Excluded:
+///   - server registry (URL+API key, kept globally so switching project
+///     doesn't blow away access to all my servers)
+///   - runtime state (isRunning, logs, lastCompletion)
+///   - performance prefs (concurrency, timeout — global tuning)
+/// JSON-encoded; written via NSSavePanel from `SHAppViewModel.saveProjectAs`.
+/// Pragmatic stand-in for full DocumentGroup (see `docs/P2_BACKLOG_DEFERRED.md`).
+struct SHProjectSnapshot: Codable, Sendable {
+    var inputFolder: String
+    var outputFolder: String
+    var cacheFolder: String
+    var promptFolder: String
+    var selectedInferenceModel: String
+    var selectedEmbeddingModel: String
+    var selectedRerankerModel: String
+    var selectedOCRModel: String
+    var extractionMode: SHExtractionMode
+    var currentPrompt: String
+    var lastLoadedPromptName: String
+    var schemaVersion: Int
+
+    init(
+        inputFolder: String,
+        outputFolder: String,
+        cacheFolder: String,
+        promptFolder: String,
+        selectedInferenceModel: String,
+        selectedEmbeddingModel: String,
+        selectedRerankerModel: String,
+        selectedOCRModel: String,
+        extractionMode: SHExtractionMode,
+        currentPrompt: String,
+        lastLoadedPromptName: String,
+        schemaVersion: Int = 1
+    ) {
+        self.inputFolder = inputFolder
+        self.outputFolder = outputFolder
+        self.cacheFolder = cacheFolder
+        self.promptFolder = promptFolder
+        self.selectedInferenceModel = selectedInferenceModel
+        self.selectedEmbeddingModel = selectedEmbeddingModel
+        self.selectedRerankerModel = selectedRerankerModel
+        self.selectedOCRModel = selectedOCRModel
+        self.extractionMode = extractionMode
+        self.currentPrompt = currentPrompt
+        self.lastLoadedPromptName = lastLoadedPromptName
+        self.schemaVersion = schemaVersion
+    }
+}
+
+/// Result of `SHAppViewModel.openProject`. The view layer matches on
+/// these to show appropriate UI:
+///   - `success`: silent; statusBar gets the message
+///   - `successNeedsRepick`: alert listing folders that need re-Vybrat
+///     because their security-scoped bookmark wasn't found in the
+///     existing registry
+///   - `failed`: alert with error text
+///   - `cancelled`: user dismissed NSOpenPanel; no UI feedback needed
+enum SHOpenProjectOutcome {
+    case success(url: URL)
+    case successNeedsRepick(url: URL, stalePaths: [String])
+    case failed(error: Error)
+    case cancelled
+}
+
 @MainActor
 @Observable
 final class SHAppViewModel {
@@ -75,7 +141,18 @@ final class SHAppViewModel {
     var benchmark: SHBenchmarkSnapshot = .init()
     var progressState: SHProgressViewState = .init()
     var logText: String = ""
-    var statusText: String = "Připraveno"
+    var statusText: String = SHAppViewModel.idleStatus
+    /// True while `statusText` matches the canonical idle message
+    /// (`Self.idleStatus`). Decouples the status-bar-collapse logic
+    /// from a hard-coded literal so localization can swap the message
+    /// without re-introducing magic-string comparisons in the view.
+    var isStatusIdle: Bool {
+        statusText == SHAppViewModel.idleStatus
+    }
+    /// Single source of truth for the "nothing to report" status. Bound
+    /// by Czech locale today; when full i18n lands the view-model
+    /// will re-localize this from a String Catalog key.
+    static let idleStatus: String = "Připraveno"
     var isRunning: Bool = false
     /// Outcome of the most recent run, used to show a persistent badge
     /// ("Hotovo" / "Přerušeno" / "Selhalo") until the user explicitly acknowledges
@@ -1154,31 +1231,6 @@ final class SHAppViewModel {
 
     // MARK: – Save / Load Project (pragmatic DocumentGroup substitute)
 
-    /// Snapshot of everything that defines a "project" — folders, server
-    /// selection, model picks, prompt, mode. Excluded:
-    ///   - server registry (URL+API key, kept globally; switching project
-    ///     shouldn't blow away access to all my servers)
-    ///   - runtime state (isRunning, logs, lastCompletion)
-    ///   - performance prefs (concurrency, timeout — global tuning)
-    /// JSON-encoded, written via NSSavePanel. The full DocumentGroup
-    /// migration is documented in `docs/P2_BACKLOG_DEFERRED.md`; this
-    /// is the lightweight "project save / load" interim that gives the
-    /// user multi-project workflow without the structural refactor.
-    struct SHProjectSnapshot: Codable {
-        var inputFolder: String
-        var outputFolder: String
-        var cacheFolder: String
-        var promptFolder: String
-        var selectedInferenceModel: String
-        var selectedEmbeddingModel: String
-        var selectedRerankerModel: String
-        var selectedOCRModel: String
-        var extractionMode: SHExtractionMode
-        var currentPrompt: String
-        var lastLoadedPromptName: String
-        var schemaVersion: Int = 1
-    }
-
     /// Encode current project state to a `.spiceharvester` JSON file
     /// chosen via NSSavePanel. Returns the chosen URL on success so the
     /// caller can show a confirmation; nil when the user cancelled.
@@ -1201,6 +1253,7 @@ final class SHAppViewModel {
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "Spice Harvester Project.spiceharvester.json"
         panel.title = "Uložit projekt jako…"
+        panel.message = "Server registry, výkonové předvolby a runtime stav se neukládají — jen složky, vybrané modely, prompt a režim."
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         do {
             let encoder = JSONEncoder()
@@ -1220,19 +1273,38 @@ final class SHAppViewModel {
     /// project shouldn't strip away the user's saved servers — but
     /// `selectedInferenceModel` and other model picks are restored, so
     /// they only "stick" if the same models are loaded on the current
-    /// server. We don't validate; whatever was saved is what gets set.
-    @discardableResult
-    func openProject() -> URL? {
+    /// server.
+    ///
+    /// Sandboxing caveat: NSOpenPanel grants access to the chosen JSON
+    /// file only, not to the folder paths described inside it. We use
+    /// existing `folderBookmarks` for paths the user previously picked
+    /// in this app; paths without a stored bookmark are loaded as
+    /// strings only and the function returns the list of "stale" paths
+    /// so the caller can warn the user to re-pick them.
+    func openProject() -> SHOpenProjectOutcome {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
         panel.title = "Otevřít projekt…"
-        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        guard panel.runModal() == .OK, let url = panel.url else { return .cancelled }
         do {
             let data = try Data(contentsOf: url)
             let snapshot = try JSONDecoder().decode(SHProjectSnapshot.self, from: data)
+
+            // Reset runtime state so the user doesn't see the previous
+            // project's "Hotovo" banner / progress card after the
+            // snapshot loads. Cached docs from the previous input are
+            // dropped because the new snapshot may point at a different
+            // folder (and even if same path, freshly invalidated is
+            // safer than stale).
+            lastCompletion = nil
+            progressState = SHProgressViewState()
+            cachedDocuments.removeAll()
+            cachedDocumentsInputPath = ""
+
+            // Apply the snapshot.
             config.inputFolder = snapshot.inputFolder
             config.outputFolder = snapshot.outputFolder
             config.cacheFolder = snapshot.cacheFolder
@@ -1244,16 +1316,48 @@ final class SHAppViewModel {
             config.extractionMode = snapshot.extractionMode
             config.currentPrompt = snapshot.currentPrompt
             config.lastLoadedPromptName = snapshot.lastLoadedPromptName
-            invalidateCachedDocumentsIfInputChanged()
+
+            // Detect paths that won't survive sandboxing — without an
+            // existing bookmark in `config.folderBookmarks` we can't
+            // open the folder. The view shows an alert so the user
+            // knows to re-pick them via Vybrat.
+            let stalePaths = staleSandboxPaths(in: snapshot)
+
             refreshInputFolderStats()
             scheduleConflictUpdate(after: 0)
             persistAll()
-            statusText = "Projekt načten: \(url.lastPathComponent)"
-            return url
+            statusText = stalePaths.isEmpty
+                ? "Projekt načten: \(url.lastPathComponent)"
+                : "Projekt načten · \(stalePaths.count) složek vyžaduje re-pick"
+            return stalePaths.isEmpty
+                ? .success(url: url)
+                : .successNeedsRepick(url: url, stalePaths: stalePaths)
         } catch {
             statusText = "Otevření projektu selhalo: \(error.localizedDescription)"
-            return nil
+            return .failed(error: error)
         }
+    }
+
+    /// Returns paths from the snapshot that lack a stored security-scoped
+    /// bookmark and can't be silently restored. The caller surfaces these
+    /// to the user as an "re-pick required" warning. Empty paths (user
+    /// hadn't set them in the saved project) are skipped.
+    private func staleSandboxPaths(in snapshot: SHProjectSnapshot) -> [String] {
+        var stale: [String] = []
+        let candidates = [
+            snapshot.inputFolder,
+            snapshot.outputFolder,
+            snapshot.cacheFolder,
+            snapshot.promptFolder
+        ]
+        for path in candidates {
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if config.folderBookmarks[trimmed] == nil {
+                stale.append(trimmed)
+            }
+        }
+        return stale
     }
 
     // MARK: – Recent folders
