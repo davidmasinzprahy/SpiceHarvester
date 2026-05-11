@@ -235,6 +235,14 @@ final class SHAppViewModel {
     /// session that issued the NSOpenPanel grant has ended.
     private var projectBookmarks: [String: Data] = [:]
 
+    /// Result-summary fields produced by the most recent extraction run.
+    /// Populated at the tail of `performExtraction` and broadcast via
+    /// `SHIntentNotifications.runDidComplete` so an awaiting
+    /// `RunSpiceHarvesterIntent` from Shortcuts.app can return a
+    /// structured payload to the calling workflow.
+    private var lastRunDocumentCount: Int = 0
+    private var lastRunCSVPath: String = ""
+
     /// Is the currently selected server's last verification still valid?
     var isSelectedServerVerified: Bool {
         guard let id = verifiedServerID, let current = selectedServer else { return false }
@@ -839,6 +847,21 @@ final class SHAppViewModel {
             ) { [weak self] _ in
                 Task { @MainActor in
                     self?.openOutput()
+                }
+            }
+            // Per-run parameter overrides from Shortcuts.app. Posted
+            // BEFORE `runAll` so the mutated `config` is what
+            // `runAll` reads. Synchronous on the main queue
+            // (`MainActor.assumeIsolated`) — no Task hop — to keep
+            // the apply→post→run sequence in one frame.
+            NotificationCenter.default.addObserver(
+                forName: SHIntentNotifications.applyParameters,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.applyIntentParameters(notification.userInfo ?? [:])
                 }
             }
         }
@@ -1540,10 +1563,12 @@ final class SHAppViewModel {
         let paths = recentProjectURLs.map { $0.path }
         let bookmarks = projectBookmarks
         let postName = Self.recentProjectsDidChange
+        let recentKey = Self.recentProjectsKey
+        let bookmarksKey = Self.projectBookmarksKey
         let sender = self
         Task.detached(priority: .utility) {
-            UserDefaults.standard.set(paths, forKey: Self.recentProjectsKey)
-            UserDefaults.standard.set(bookmarks, forKey: Self.projectBookmarksKey)
+            UserDefaults.standard.set(paths, forKey: recentKey)
+            UserDefaults.standard.set(bookmarks, forKey: bookmarksKey)
             await MainActor.run {
                 NotificationCenter.default.post(name: postName, object: sender)
             }
@@ -1870,6 +1895,42 @@ final class SHAppViewModel {
         }
     }
 
+    /// Hydrates per-run overrides from `SHIntentNotifications.applyParameters`
+    /// userInfo onto `config`. Called BEFORE `runAll` reads `config`, so
+    /// the Shortcuts user can switch modes / prompts per workflow run
+    /// without touching the persisted app state. Unknown keys are
+    /// ignored; absent keys leave the existing value in place.
+    ///
+    /// The prompt lookup is name-based against the loaded prompt
+    /// library — Shortcuts users typically type a stable filename
+    /// (e.g. `lekarska-zprava.md`) rather than pasting a multi-KB
+    /// prompt body into the action UI. Falls back silently when the
+    /// name doesn't match (the run still proceeds with the previous
+    /// prompt, and the failure surfaces in the result dialog via
+    /// `statusText` when the user notices empty output).
+    fileprivate func applyIntentParameters(_ userInfo: [AnyHashable: Any]) {
+        if let raw = userInfo["mode"] as? String,
+           let mode = SHExtractionMode(rawValue: raw) {
+            config.extractionMode = mode
+        }
+        if let name = userInfo["promptName"] as? String,
+           !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Match case-insensitively and tolerate the `.md` suffix
+            // being missing — Shortcuts is a string field, users will
+            // type whatever's quickest. Look in `availablePromptFiles`
+            // first (already scanned), fall back to a fresh disk scan
+            // when the picker hasn't been refreshed this session.
+            let normalized = name.lowercased()
+            let withSuffix = normalized.hasSuffix(".md") ? normalized : "\(normalized).md"
+            if let match = availablePromptFiles.first(where: { url in
+                let lower = url.lastPathComponent.lowercased()
+                return lower == normalized || lower == withSuffix
+            }) {
+                loadPromptFile(match)
+            }
+        }
+    }
+
     /// Cancel the currently running task (if any). A cancelled task propagates a
     /// `CancellationError` through the pipeline, which is surfaced as a warning in
     /// the status text.
@@ -1897,6 +1958,11 @@ final class SHAppViewModel {
         }
         // Clear any stale badge from a previous run.
         lastCompletion = nil
+        // Reset summary fields so a `.notStarted` (pre-condition fail)
+        // or `.failed` outcome doesn't carry stale counts from the
+        // previous run into the `runDidComplete` payload.
+        lastRunDocumentCount = 0
+        lastRunCSVPath = ""
         runEntered = true
         isRunning = true
 
@@ -1931,6 +1997,30 @@ final class SHAppViewModel {
         if outcome != .notStarted, !NSApp.isActive {
             postCompletionNotification(for: outcome)
         }
+
+        // Broadcast the run summary so a `RunSpiceHarvesterIntent`
+        // (Shortcuts.app) currently awaiting completion can resume
+        // its continuation. The payload mirrors what the intent's
+        // ReturnsValue / ProvidesDialog needs — kept lean (primitives)
+        // so the Notification can cross actor boundaries without
+        // sendable warnings.
+        let outcomeRaw: String
+        switch outcome {
+        case .success: outcomeRaw = "success"
+        case .cancelled: outcomeRaw = "cancelled"
+        case .failed: outcomeRaw = "failed"
+        case .notStarted: outcomeRaw = "notStarted"
+        }
+        NotificationCenter.default.post(
+            name: SHIntentNotifications.runDidComplete,
+            object: nil,
+            userInfo: [
+                "outcome": outcomeRaw,
+                "documentCount": lastRunDocumentCount,
+                "csvPath": lastRunCSVPath,
+                "statusText": statusText
+            ]
+        )
 
         isRunning = false
         runEntered = false
@@ -2210,6 +2300,14 @@ final class SHAppViewModel {
 
             let cacheHits = pipeline.cacheHits()
             let cacheSuffix = cacheHits > 0 ? " · \(cacheHits)× cache hit" : ""
+
+            // Snapshot summary fields for the Shortcuts/AppIntent
+            // bridge. `executeRun` reads these after the worker
+            // returns and includes them in the `runDidComplete`
+            // userInfo payload. `exportAll` writes `results.csv` into
+            // `outputURL` — hardcoded filename matches `SHExportService`.
+            lastRunDocumentCount = results.count
+            lastRunCSVPath = outputURL.appendingPathComponent("results.csv").path
 
             if Task.isCancelled {
                 progressState.phase = .finished
