@@ -380,6 +380,58 @@ final class SHAppViewModel {
         return "Nastav parametry modelu"
     }
 
+    /// Title shown in the window's title bar (and in each tab when
+    /// macOS merges multiple SpiceHarvester windows into a tabbed
+    /// window — primary + Cmd+Shift+N scratch windows). Picks a
+    /// human-readable tag that identifies *what this window is
+    /// working on* so the user can tell tabs apart at a glance
+    /// instead of seeing four identical "SpiceHarvester" labels.
+    ///
+    /// Priority (most specific → most generic):
+    ///   1. Input folder name (most meaningful — answers "which batch?")
+    ///   2. Loaded prompt name (when no input is set yet)
+    ///   3. "scratch" indicator for unconfigured scratch windows
+    ///   4. Bare app name for the empty primary window
+    ///
+    /// Updates reactively because `config.inputFolder` /
+    /// `config.lastLoadedPromptName` / `isRunning` are observable.
+    var windowTitle: String {
+        let base = "Spice Harvester"
+        let inputName = (config.inputFolder as NSString).lastPathComponent
+        let promptStem = (config.lastLoadedPromptName as NSString)
+            .deletingPathExtension
+        let tag: String
+        if !inputName.isEmpty {
+            tag = inputName
+        } else if !promptStem.isEmpty {
+            tag = promptStem
+        } else if persistenceMode == .scratch {
+            tag = "scratch"
+        } else {
+            return base
+        }
+        let scratchMark = persistenceMode == .scratch ? " · scratch" : ""
+        return "\(base) — \(tag)\(scratchMark)"
+    }
+
+    /// Optional subtitle line shown under the window title (macOS
+    /// title bar supports primary + secondary text). Surfaces the
+    /// current run mode + live progress when running, otherwise the
+    /// last-completed counts. Empty string = subtitle hidden.
+    var windowSubtitle: String {
+        if isRunning {
+            let modeLabel = config.extractionMode.title
+            if progressState.counters.foundPDFs > 0 {
+                return "\(modeLabel) · \(progressState.counters.completed) / \(progressState.counters.foundPDFs)"
+            }
+            return "\(modeLabel) · běží"
+        }
+        if lastRunDocumentCount > 0 {
+            return "Hotovo · \(lastRunDocumentCount) dokumentů"
+        }
+        return ""
+    }
+
     private var hasModelParameters: Bool {
         hasSelectedServer && hasInferenceModel && hasOCRPreprocessingRequirements
     }

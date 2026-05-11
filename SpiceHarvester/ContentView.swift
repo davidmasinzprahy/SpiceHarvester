@@ -124,6 +124,15 @@ struct ContentView: View {
         // state to actually fade in/out instead of popping.
         .animation(.easeInOut(duration: 0.12), value: focus)
         .frame(minWidth: 940, minHeight: 660)
+        // Per-window title + subtitle. Without these every window /
+        // tab shows the bare "SpiceHarvester" bundle name — when the
+        // user opens a scratch via Cmd+Shift+N or merges windows
+        // into a tabbed window, four identical titles make it
+        // impossible to tell which batch each tab is processing.
+        // `windowTitle` resolves to the input folder name (or
+        // loaded prompt name) so each tab self-labels.
+        .navigationTitle(vm.windowTitle)
+        .navigationSubtitle(vm.windowSubtitle)
         // Honor the user's Dynamic Type preference but clamp it: dense
         // dashboards break above accessibility3 (text wraps cards into
         // unreadable column widths). Below medium doesn't make text
