@@ -24,6 +24,25 @@ Pokročilá nastavení (souběžnost, throttle, kontext modelu, timeout, OCR bac
 - Scratch okno **nepersistuje** do UserDefaults (server registry sdílen, ostatní per-session)
 - Pro persistování: **Uložit projekt jako…** (Cmd+Shift+S) → `.spiceharvester.json`
 
+### Identifikace záložky v titulku okna
+
+Když si macOS sloučí okna do tabů (Window → Sloučit všechna okna), každý tab/okno ukazuje svůj kontext, takže nevidíš čtyři stejné „SpiceHarvester":
+
+- **Titulek**: `Spice Harvester — <jméno vstupní složky>` (např. `Spice Harvester — EmbolieTesty`); ze scratch okna doplněno `· scratch`
+- **Podtitulek**: `<server> · <režim> · <progres>` (např. `Local LM Studio · FAST · 5 / 16`). Při klidovém stavu jen server. Po dokončení `Hotovo · N dokumentů`
+
+Pokud chceš různé tabs spouštět **paralelně proti různým LM Studio instancím**, přidej víc serverů (různé Base URL) v sekci Server a v každé záložce vyber jiný. Server v titulku ti potvrdí kombinaci.
+
+### Detekce kolize výstupní složky
+
+Pokud máš ve dvou tabech stejnou **výstupní složku** a v jedné spustíš pipeline, druhý tab tlačítko Spustit zakáže — proběh by jinak přepsal `results.csv` prvního. Status text v druhém tabu ukáže: *„Výstupní složka je zaneprázdněná jinou záložkou (Spice Harvester — XY) — počkej, nebo zvol jinou."*
+
+Cleanup je automatický — když první běh skončí (success/cancel/fail), druhý tab se odblokuje.
+
+### Nápověda jako samostatné okno
+
+`Cmd+?` (nebo tlačítko Nápověda) otevře **samostatné okno** s nápovědou — ne sheet. V tabbed-window scénáři by sheet jinak „přesakoval" do všech tabů. Druhé Cmd+? jen fokusne existující okno (singleton).
+
 ## Save / Open Project
 
 - **Cmd+Shift+S** — uloží snapshot folderů, modelů, promptu a režimu do `.spiceharvester.json`
@@ -102,10 +121,17 @@ Hlasem (Siri / Spotlight, macOS 14+): *„Spusť Spice Harvester"*, *„Run Spic
 
 | Parametr | Co dělá | Pokud zůstane prázdné |
 |---|---|---|
-| **Režim** | Picker FAST / SEARCH / CONSOLIDATE — přepíše režim extrakce jen pro tento běh | Použije se režim aktuálně zvolený v aplikaci |
+| **Režim** | Picker FAST / SEARCH / CONSOLIDATE — přepíše režim extrakce jen pro tento běh | Použije se režim aktuálně zvolený v cílové záložce |
 | **Název promptu** | Filename z prompt složky (např. `lekarska-zprava.md`) — načte se před spuštěním. Tolerantní k velikosti písmen a `.md` suffix lze vynechat | Použije se prompt načtený v editoru |
+| **Cílová záložka (vstupní složka)** | Název vstupní složky té záložky, ve které se má extrakce spustit (např. `EmbolieTesty`). Match je case-insensitive | Spustí se v hlavní záložce (primary window) |
 
-Vstupní/výstupní/cache/prompt složka, server a model se **vždy** berou z uložené konfigurace aplikace. (Důvod: macOS sandbox vyžaduje, aby cesty měly platný security-scoped bookmark; ten vzniká jedině když je uživatel vybere přes pickeer v aplikaci. Předání cesty parametrem v Zkratkách by sandbox stejně odmítl.)
+Vstupní/výstupní/cache/prompt složka, server a model se **vždy** berou z uložené konfigurace cílové záložky. (Důvod: macOS sandbox vyžaduje, aby cesty měly platný security-scoped bookmark; ten vzniká jedině když je uživatel vybere přes picker v aplikaci. Předání cesty parametrem v Zkratkách by sandbox stejně odmítl.)
+
+**Cílení na konkrétní záložku** umožní paralelně spravovat víc workflow v jedné app — např. jeden plánovaný job v 8:00 pro `EmbolieTesty`, druhý v 9:00 pro `Pacient2025`. Pokud žádná otevřená záložka název vstupní složky nemá, akce vrátí `notStarted · Žádná otevřená záložka nemá vstupní složku: <název>`.
+
+Při spuštění akce přivolá aplikace cílovou záložku do popředí (makeKeyAndOrderFront), takže v tabbed-window groupách hned vidíš, kde běh probíhá.
+
+**Override teď neměnní permanentně app config:** snapshot/restore — po skončení běhu se režim/prompt v UI vrátí na hodnoty před spuštěním Shortcutu. Plánované joby s `mode: SEARCH` nepřepíšou tvůj denní FAST setup.
 
 ### Návratová hodnota
 

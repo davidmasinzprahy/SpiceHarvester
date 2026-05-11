@@ -44,7 +44,7 @@ Výchozí režim je **FAST** (bez embeddingů).
 - Export: JSON (canonical), TXT, CSV (UTF-8 BOM pro Excel), per-dokument `*_raw.json` / `*_raw.csv` / `*_raw.txt`, agregátní `raw_responses.json`
 
 ### UX a produktivita
-- **Multi-window**: primary + scratch okna (Cmd+Shift+N) s nezávislým view-modelem; scratch okna nepersistují konfiguraci do UserDefaults
+- **Multi-window**: primary + scratch okna (Cmd+Shift+N) s nezávislým view-modelem; scratch okna nepersistují konfiguraci do UserDefaults. **Titulek + podtitulek per-tab** (vstupní složka · server · režim · progres) takže po sloučení do tabů poznáš každou záložku. **Kolize výstupní složky** je detekována a druhý paralelní běh do stejné cesty se zablokuje.
 - **Save / Open Project** — `.spiceharvester.json` snapshot folderů, modelů, promptu a režimu (Cmd+Shift+S / Cmd+O)
 - **Tab / Shift+Tab navigace** mezi aktivními tlačítky (vlastní `NSEvent` monitor, nezávislý na systémovém Keyboard Navigation)
 - **Cmd+1 / Cmd+2 / Cmd+3** přepínání režimu FAST / SEARCH / CONSOLIDATE
@@ -63,7 +63,7 @@ Výchozí režim je **FAST** (bez embeddingů).
 - **Health watcher** — 30 s ambient ping na `/v1/models` po Ověřit; status pill zčervená při disconnectu
 - **Server URL inline validace** — ⚠️ ikona u malformed Base URL bez čekání na Ověřit
 - **Notification Center** na completion (success/cancelled/failed) s akcí "Otevřít výstup"
-- **Shortcuts.app jako plnohodnotný job** — `Spustit extrakci` s parametry (režim, název promptu), čeká na dokončení a vrátí cestu k `results.csv` pro řetězení s dalšími akcemi (mail, Slack, git push…). Plánovatelné přes Automation tab. + Spotlight + Siri
+- **Shortcuts.app jako plnohodnotný job** — `Spustit extrakci` s parametry (režim, název promptu, cílová záložka), čeká na dokončení a vrátí cestu k `results.csv` pro řetězení s dalšími akcemi (mail, Slack, git push…). Plánovatelné přes Automation tab. Cílení podle vstupní složky umožní paralelní joby v různých záložkách. + Spotlight + Siri
 - **Window position persistence** — manuální resize/move přežívá restart
 - **Status bar** auto-collapse když není runtime status
 - **VSplitView** s tažitelnými dělítky mezi Prompt / Průběh / Log

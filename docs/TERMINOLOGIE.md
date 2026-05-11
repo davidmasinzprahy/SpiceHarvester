@@ -53,6 +53,11 @@ Jediný zdroj pravdy pro pojmenování v GUI, nápovědě (HelpSheet) a uživate
 | Job / plánovaný běh | **job** (uživatelská dokumentace), v helpu **plánovaný běh** | — | Synonyma. Vždy myšleno spuštění přes Zkratky / Automation, ne cron na úrovni OS. |
 | Parametr akce | **parametr** | `@Parameter` | UI label v editoru Zkratky: **Režim** / **Název promptu**. |
 | Návratová hodnota akce | **výstup akce** (UI Zkratek) / **cesta k results.csv** | `ReturnsValue<String>` | Co dostane další krok ve Zkratce. |
+| Cílová záložka | **cílová záložka** (parametr) | `targetFolder` parameter | V helpu: „název vstupní složky té záložky, kde má pipeline běžet". |
+| Titulek záložky / okna | **titulek záložky** | `windowTitle` (computed) | Co macOS renderuje v title baru a v tab labelu po sloučení oken. Formát: `Spice Harvester — <input> [· scratch]`. |
+| Podtitulek záložky | **podtitulek** | `windowSubtitle` (computed) | Pod titulkem (macOS title bar). Server · režim · progres/dokončení. |
+| Kolize výstupní složky | **výstupní složka je zaneprázdněná jinou záložkou** | `activeOutputClaims` | Status text při blokovaném spuštění. |
+| Help okno | **Nápověda Spice Harvester** | `Window(id: "help")` | Samostatné okno, ne sheet. Singleton — druhé Cmd+? fokusne existující. |
 
 ## Kontrola konzistence
 

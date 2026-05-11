@@ -416,37 +416,59 @@ var isVerifiedServerReachable: Bool = true
 
 #### AppIntents bridge (Shortcuts.app jako job)
 
-Čtyři Notification kanály (`SHIntentNotifications.*`) tvoří kontrakt mezi `RunSpiceHarvesterIntent.perform()` (běží mimo SwiftUI graph) a `SHAppViewModel` (běží uvnitř):
+`RunSpiceHarvesterIntent.perform()` volá `SHAppViewModel.runFromIntent(...)` **přímo** přes process-wide weak registry. Žádný NotificationCenter dance — odstraněn po code review, který odhalil dva race conditions (multi-vm claiming stejný `runAll` broadcast, intent observer matchoval špatný `runDidComplete`).
 
-| Notification | Směr | UserInfo | Účel |
-|---|---|---|---|
-| `runAll` | intent → vm | — | Spustí `await runAll()` (po `applyParameters`) |
-| `openOutput` | intent → vm | — | Volá `openOutput()` |
-| `applyParameters` | intent → vm | `mode: String?`, `promptName: String?` | Per-run override mode + prompt PŘED `runAll` |
-| `runDidComplete` | vm → intent | `outcome`, `documentCount`, `csvPath`, `statusText` | Resume continuation v `perform()`, dá strukturovaný return |
+Klíčové komponenty:
 
-Observers `runAll` / `openOutput` / `applyParameters` registrovány **pouze v `.persistent` vm** — bez gate by každé scratch okno reagovalo paralelně:
+| Komponenta | Účel |
+|---|---|
+| `SHAppViewModel.liveRegistry: NSHashTable<SHAppViewModel>` (weak) | Process-wide registr všech živých vmů. Init vmu se přidá, dealloc auto-prune. |
+| `SHAppViewModel.runFromIntent(targetFolder:mode:promptName:)` `@MainActor` static | Resolves target → vm, brings to front, applies overrides, awaits runAll, restores, returns summary tuple |
+| `SHAppViewModel.resolveIntentTarget(targetFolder:)` private static | Match by `config.inputFolder.lastPathComponent` (case-insensitive); fallback na `.persistent` vm |
+| `SHAppViewModel.applyIntentParameters([AnyHashable: Any])` fileprivate | Snapshot (mode + currentPrompt + lastLoadedPromptName) → mutate. Direct .md read přes `withScopedAccess(promptFolder)` — bypassuje `loadPromptFile`'s `persistAll()` |
+| `SHAppViewModel.restoreIntentOverridesIfNeeded()` private | Restore from snapshot + `persistAll` pokud něco bylo modifikováno. Volaný i z reject path |
+
+Flow v `runFromIntent`:
+
 ```swift
-if #available(macOS 13.0, *), persistenceMode == .persistent {
-    NotificationCenter.default.addObserver(...)
-}
+1. resolveIntentTarget(targetFolder:) → vm? + failureMessage?
+2. Guard !vm.isRunning && vm.canRunAll → reject early (no override applied → no UI flicker)
+3. NSApp.windows.first { $0.title == vm.windowTitle }?.makeKeyAndOrderFront(nil)
+4. applyIntentParameters({mode, promptName})  // snapshot + mutate
+5. await vm.runAll()                          // executeRun synchronously
+6. restoreIntentOverridesIfNeeded()           // rollback to snapshot
+7. Read vm.lastCompletion / lastRunDocumentCount / lastRunCSVPath / statusText
+8. Return summary tuple
 ```
 
-`runDidComplete` post je naopak **bez gate** — broadcast jde ven z každého vm, ale `RunSpiceHarvesterIntent` registruje observer s `object: nil` jen pro jednu invocaci, takže potkat se může jen s `.persistent` vm (`runAll` poslouchá taky jen ten).
-
-`SHRunSummaryPayload` v `SHAppIntents.swift` je private struct — vm assembluje primitivy do `userInfo` dict, intent decoduje zpět. CSV cesta = `outputURL.appendingPathComponent("results.csv")` (filename hardcoded v `SHExportService.exportAll`).
-
-`perform()` čeká přes `withCheckedContinuation` — observer registrace BEFORE `runAll` post (synchronní v continuation closure), takže cache-only sub-secondový běh neunikne. Token observeru drží `SHObserverTokenBox` (`@unchecked Sendable` class) — jinak `@Sendable` closure tripuje "mutated after capture" warning.
-
-`applyIntentParameters` v vm:
-- `mode: SHExtractionMode(rawValue: ...)` → `config.extractionMode`
-- `promptName` → `availablePromptFiles.first { lowercased match s tolerance na .md suffix }` → `loadPromptFile(URL)`
-- Sandbox grant pro vstupní/výstupní složku se neřeší — beru existující bookmarky z `config.folderBookmarks`. Cesta předaná z Zkratek by stejně sandbox grant nedostala.
+`SHIntentNotifications` enum nyní obsahuje pouze `openOutput` — používá ho `SHAppDelegate` pro UN notifikační action button (delegát nemá direct vm reference, takže notifikace zůstává nejlevnější bridge).
 
 Tracking fields v vm:
 - `lastRunDocumentCount: Int` — set v `performExtraction` po `pipeline.run` (results.count)
-- `lastRunCSVPath: String` — set v `performExtraction` po `exportAll`
-- Reset na `0` / `""` na začátku `executeRun` ať `.notStarted` / `.failed` outcome neneseš starý summary
+- `lastRunCSVPath: String` — set v `performExtraction` po `exportAll`. Filename `results.csv` hardcoded v `SHExportService.exportAll`
+- `intentOverrideRestore: (SHExtractionMode, String, String)?` — snapshot pre-override stavu, konzumovaný `restoreIntentOverridesIfNeeded`
+- Reset summary fields na `0` / `""` na začátku `executeRun` ať `.notStarted` / `.failed` outcome neneseš starý summary
+
+#### Multi-window collision detection + per-window naming
+
+Cross-tab safety:
+- `SHAppViewModel.activeOutputClaims: [String: SHAppViewModel]` (static `@MainActor`) — claim na výstupní složku během běhu. `executeRun` před `isRunning = true` zkontroluje, identity check `claimant !== self` ochraňuje proti omylem releasu cizího claimu. Path je normalizován přes `normalizeOutputPath` (trim + standardizingPath).
+- Status text při kolizi: `"Výstupní složka je zaneprázdněná jinou záložkou (<title>) — počkej, nebo zvol jinou."` — uvádí windowTitle blokujícího vmu.
+
+Per-window naming:
+- `SHAppViewModel.windowTitle: String` — priority: input folder name → prompt stem → `scratch` indicator → bare app name. Scratch mode dopln `· scratch` suffix.
+- `SHAppViewModel.windowSubtitle: String` — `<server name | host> · <mode · X / Y> | <Hotovo · N dokumentů>`. Empty když není ani server ani run state.
+- `ContentView` aplikuje `.navigationTitle(vm.windowTitle)` + `.navigationSubtitle(vm.windowSubtitle)`. Reaktivní přes @Observable.
+
+Test cleanup:
+- `SHAppViewModel._resetStaticStateForTesting()` pod `#if DEBUG` čistí `activeOutputClaims` + `liveRegistry`. `SpiceHarvesterTests.init()` ho volá před každým @Test.
+
+#### Help window — Window scene (ne sheet)
+
+`Window("Nápověda Spice Harvester", id: "help")` v App scéně. `HelpWindowView` wrapper s `@Environment(\.dismissWindow)` pro close. Důvody:
+- Sheet by se v tabbed-window groupách (Window → Sloučit okna) attachoval na sdílený parent NSWindow → bleed do všech tabů.
+- `Window` (na rozdíl od `WindowGroup`) je skutečný singleton: druhé `openWindow(id: "help")` fokusne existující instance.
+- `Window` má jinou window class než `WindowGroup`, takže ji macOS nemerguje s ostatními tabs.
 
 #### Důležité chování
 - `runExtraction()` automaticky spustí předzpracování, pokud ještě nejsou data v paměti

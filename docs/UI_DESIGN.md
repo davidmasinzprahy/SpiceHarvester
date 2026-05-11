@@ -1067,19 +1067,17 @@ Po dokončení runu (jen když `!NSApp.isActive`) post UNNotificationRequest s `
 - "Otevřít výstup" (`OPEN_OUTPUT` action ID, `.foreground`) → SHAppDelegate routes na `SHIntentNotifications.openOutput` → primary vm `openOutput()`.
 
 ### 29.14 AppIntents (Shortcuts.app jako job)
-- `RunSpiceHarvesterIntent` — `openAppWhenRun = true`, parametrizovaný + čeká na dokončení:
+- `RunSpiceHarvesterIntent` — `openAppWhenRun = true`, parametrizovaný + čeká na dokončení, podporuje cílení na záložku:
   - `@Parameter mode: SHExtractionModeIntent?` (AppEnum mirror SHExtractionMode — picker FAST/SEARCH/CONSOLIDATE)
   - `@Parameter promptName: String?` (lookup v `availablePromptFiles`, tolerance na case + `.md` suffix)
+  - `@Parameter targetFolder: String?` — název vstupní složky té záložky, kde se má extrakce spustit. Nil = primary
   - `ReturnsValue<String>`: cesta k `results.csv` (lze zřetězit s další akcí ve Zkratce)
   - `ProvidesDialog`: Siri / banner text
-  - `perform()` ČEKÁ na completion notifikaci přes `withCheckedContinuation` — observer registrován BEFORE `runAll` post, token v `SHObserverTokenBox` (`@unchecked Sendable` class)
-- `OpenOutputFolderIntent` — postne `SHIntentNotifications.openOutput` (beze změny)
+  - `perform()` volá `SHAppViewModel.runFromIntent(...)` přímo přes `liveRegistry` (NSHashTable.weakObjects) — žádný NotificationCenter dance. Odstraněno po code review (race: multi-vm na stejném broadcastu, špatný runDidComplete match)
+- `OpenOutputFolderIntent` — postne `SHIntentNotifications.openOutput` (beze změny — používá ho i SHAppDelegate pro UN action button)
 - `SpiceHarvesterShortcuts: AppShortcutsProvider` registruje fráze v Shortcuts/Spotlight/Siri
-- `SHIntentNotifications`:
-  - `runAll`, `openOutput` (intent → vm; observer gate `persistenceMode == .persistent`)
-  - `applyParameters` (intent → vm; userInfo `mode`/`promptName`; `MainActor.assumeIsolated` synchronní apply)
-  - `runDidComplete` (vm → intent; userInfo `outcome` + `documentCount` + `csvPath` + `statusText`)
-- vm tracking: `lastRunDocumentCount: Int` + `lastRunCSVPath: String`, set v `performExtraction` po `exportAll`, reset na začátku `executeRun`
+- `SHIntentNotifications` — pouze `openOutput` (ostatní notifications odstraněny)
+- vm tracking: `lastRunDocumentCount` + `lastRunCSVPath`, set v `performExtraction` po `exportAll`. `intentOverrideRestore` snapshot pre-override stavu pro snapshot/restore semantics
 
 ### 29.15 Save / Open Project
 - `SHProjectSnapshot: Codable` (top-level v Models layer kontextu) — folders + model picks + mode + prompt + lastLoadedPromptName
@@ -1088,3 +1086,14 @@ Po dokončení runu (jen když `!NSApp.isActive`) post UNNotificationRequest s `
 - "Tento JSON není projekt" error když chybí `schemaVersion` klíč
 - Reset `lastCompletion` + `progressState` + `cachedDocuments` + `dismissedConflictIDs` před apply
 - Sandbox bookmarky **se neobnoví** — `staleSandboxPaths` detekuje cesty bez bookmarku, `SHAppDelegate.handleOpenProjectOutcome` ukáže alert
+
+### 29.16 Multi-window naming + collision detection
+- `SHAppViewModel.windowTitle`: input folder name → prompt stem → `scratch` indicator → bare app name. Scratch dopln `· scratch`.
+- `SHAppViewModel.windowSubtitle`: `<server name | host> · <mode · progress | Hotovo · N dokumentů>`. Reaktivní přes @Observable.
+- `ContentView` aplikuje `.navigationTitle(vm.windowTitle)` + `.navigationSubtitle(vm.windowSubtitle)` na root — propaguje se do NSWindow title a do tab labelu v tabbed-window groupách.
+- `activeOutputClaims: [String: SHAppViewModel]` (static @MainActor): claim výstupní složky během běhu. Druhý tab se stejnou cestou je v `executeRun` rejectnut s message zmiňující windowTitle blokujícího vmu.
+
+### 29.17 Help window (singleton)
+- `Window("Nápověda Spice Harvester", id: "help")` — NE `WindowGroup`. Důvod: WindowGroup povoluje vícero instancí při opakovaném `openWindow(id:)`, `Window` je skutečný singleton.
+- `HelpWindowView` wrapper s `@Environment(\.dismissWindow)` pro custom close button.
+- Sheet pattern by se v tabbed-window groupách attachoval na sdílený parent NSWindow → bleed do všech tabů; samostatná window scene tomu předchází.

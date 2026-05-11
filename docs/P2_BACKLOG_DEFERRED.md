@@ -9,9 +9,9 @@ implementace, scope a očekávaný čas. Slouží jako vstup pro budoucí ticket
 | Položka | Stav |
 |---|---|
 | Lokalizace (String Catalog) | ✅ Hotovo |
-| AppIntents pro Shortcuts | ✅ Hotovo + parametry + wait + structured return (CSV cesta) |
+| AppIntents pro Shortcuts | ✅ Hotovo + parametry + wait + targetFolder + tab activation + structured return |
 | Save / Load Project commands (interim za DocumentGroup) | ✅ Hotovo |
-| Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo (minimal) |
+| Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo + per-tab title/server + collision detection + Help window scene |
 | Quick Look provider source | 🟡 Source ready, target chybí |
 | Quick Look Preview Extension target | 📋 Vyžaduje Xcode IDE (#1 níže) |
 | Plný DocumentGroup s file-based persistencí | 📋 3-day refactor (#3 níže) |
