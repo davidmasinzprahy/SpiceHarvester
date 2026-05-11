@@ -251,20 +251,20 @@ struct SpiceHarvesterApp: App {
         }
         .defaultSize(width: 1180, height: 980)
 
-        // Help window — separate scene so it lives independently of
-        // any tabbed group. `WindowGroup` without a `for:` parameter
-        // is a singleton (macOS reuses the existing window when
-        // `openWindow(id: "help")` fires while it's already open),
-        // so the user gets at most one help window regardless of how
-        // many tabs they have.
-        WindowGroup(id: "help") {
+        // Help window — `Window` (not `WindowGroup`) because Help is
+        // semantically a singleton: pressing Cmd+? twice should
+        // focus the existing window, not spawn a second one.
+        // `WindowGroup` even with an id: parameter still permits
+        // multiple instances when openWindow fires repeatedly,
+        // which would leave the user with stacked duplicate help
+        // windows. `Window` scene auto-focuses the existing
+        // instance on `openWindow(id:)`. Also a Window scene
+        // doesn't merge into tabbed-window groups (different
+        // window class), so Help is truly independent.
+        Window("Nápověda Spice Harvester", id: "help") {
             HelpWindowView()
         }
         .defaultSize(width: 760, height: 720)
-        // `.contentOnly` style hides the standard title bar text /
-        // toolbar — Help has its own custom header with a close
-        // button, no need to duplicate.
-        .windowResizability(.contentSize)
     }
 }
 

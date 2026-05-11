@@ -2208,22 +2208,48 @@ final class SHAppViewModel {
         guard let vm = resolved.vm else {
             return ("notStarted", 0, "", resolved.failureMessage ?? "Cílová záložka nenalezena")
         }
+
+        // Pre-flight: reject early if the vm can't accept a run,
+        // BEFORE applying any per-run overrides. Avoids a brief
+        // UI flicker where the user sees the mode picker or prompt
+        // text editor switch to the override value and then snap
+        // back when we restore in the reject path.
+        //
+        // We test canRunAll against the CURRENT config, not the
+        // overridden one, because the user's "is this tab ready"
+        // mental model is the unchanged state. If `mode: .search`
+        // override would itself unblock the run (e.g. by switching
+        // to a mode that doesn't need an embedding model the user
+        // hasn't configured), the user can fix that themselves and
+        // re-trigger the Shortcut.
+        guard !vm.isRunning, vm.canRunAll else {
+            return ("notStarted", 0, "", vm.toolbarReadyText)
+        }
+
+        // Best-effort: surface the target tab so the user sees the
+        // progress in the right window. NSApp.activate brings the
+        // app forward (already done by `openAppWhenRun: true`),
+        // makeKeyAndOrderFront brings the specific NSWindow forward
+        // — important in tabbed-window groups where the focused
+        // tab won't change just because the app activates. Match
+        // by `windowTitle` which we set via `.navigationTitle`.
+        let targetTitle = vm.windowTitle
+        if let window = NSApp.windows.first(where: { $0.title == targetTitle }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+
         var overrides: [String: Any] = [:]
         if let mode { overrides["mode"] = mode }
         if let promptName { overrides["promptName"] = promptName }
         if !overrides.isEmpty {
             vm.applyIntentParameters(overrides)
         }
-        guard !vm.isRunning, vm.canRunAll else {
-            // Roll back any override we just snapshot-applied so the
-            // user's UI doesn't keep a phantom prompt/mode swap.
-            vm.restoreIntentOverridesIfNeeded()
-            return ("notStarted", 0, "", vm.toolbarReadyText)
-        }
         await vm.runAll()
-        // Restore overrides — same lifecycle as the old
-        // `broadcastRunDidComplete` did, but now triggered locally
-        // since we don't go through NotificationCenter.
+        // Restore overrides — moved out of `broadcastRunDidComplete`
+        // when we switched from NotificationCenter to direct-call
+        // semantics; restoration now happens locally so it's
+        // guaranteed even when the run ends in `.failed` /
+        // `.cancelled` (which `runAll` swallows internally).
         vm.restoreIntentOverridesIfNeeded()
         let outcomeStr: String
         switch vm.lastCompletion {
