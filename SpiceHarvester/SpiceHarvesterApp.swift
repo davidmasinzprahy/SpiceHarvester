@@ -208,15 +208,22 @@ struct SpiceHarvesterApp: App {
 
                 // Režim extrakce zkratky. Moved from .toolbar placement
                 // — mode is pipeline-behavior config, not view state.
+                //
+                // Gating on `focusedVM == nil` disables Cmd+1/2/3 when
+                // the Settings scene is in front (Settings doesn't
+                // publish `.focusedViewModel`). Without this, the user
+                // could accidentally flip the main window's extraction
+                // mode while typing in a Settings text field — the
+                // shortcut is bound globally by SwiftUI commands.
                 Button("Režim FAST") { targetVM.config.extractionMode = .fast }
                     .keyboardShortcut("1", modifiers: .command)
-                    .disabled(targetVM.isRunning)
+                    .disabled(focusedVM == nil || targetVM.isRunning)
                 Button("Režim SEARCH") { targetVM.config.extractionMode = .search }
                     .keyboardShortcut("2", modifiers: .command)
-                    .disabled(targetVM.isRunning)
+                    .disabled(focusedVM == nil || targetVM.isRunning)
                 Button("Režim CONSOLIDATE") { targetVM.config.extractionMode = .consolidate }
                     .keyboardShortcut("3", modifiers: .command)
-                    .disabled(targetVM.isRunning)
+                    .disabled(focusedVM == nil || targetVM.isRunning)
 
                 Divider()
 

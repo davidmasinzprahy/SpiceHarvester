@@ -120,11 +120,18 @@ struct SHProjectSnapshot: Codable, Sendable {
 /// passed through as-is — they're already descriptive enough.
 enum SHProjectError: LocalizedError {
     case notAProject(url: URL)
+    /// Read failed with a sandbox permission error AND we have no
+    /// working security-scoped bookmark for the path. Tells the user
+    /// the specific remediation (re-pick the file via Cmd+O) instead
+    /// of the generic "neoprávněný přístup" alert.
+    case permissionDenied(url: URL)
 
     var errorDescription: String? {
         switch self {
         case .notAProject(let url):
             return "Soubor \(url.lastPathComponent) není projekt Spice Harvester. Otevři soubor exportovaný přes Uložit projekt jako…"
+        case .permissionDenied(let url):
+            return "Cesta \(url.lastPathComponent) vyžaduje opětovné udělení přístupu. macOS sandbox neuchovává oprávnění mezi spuštěními bez platného bookmarku. Otevři soubor znovu přes File → Otevřít projekt… (Cmd+O)."
         }
     }
 }
@@ -782,23 +789,12 @@ final class SHAppViewModel {
             }
         }
 
-        // Restore recent project file URLs. Stored as path strings (URLs
-        // don't survive Codable cleanly across sandbox boundaries), then
-        // re-instantiated as file URLs. Filtering existing paths happens
-        // at click-time in the menu so we don't lose history just because
-        // a project is temporarily on an unmounted drive.
-        if let savedPaths = UserDefaults.standard.array(forKey: Self.recentProjectsKey) as? [String] {
-            self.recentProjectURLs = savedPaths
-                .prefix(Self.recentProjectsLimit)
-                .map { URL(fileURLWithPath: $0) }
-        }
-
-        // Restore project security-scoped bookmarks. UserDefaults stores
-        // them as [String: Data] which Foundation rehydrates as
-        // [String: NSData] — explicit cast keeps Swift types tidy.
-        if let savedBookmarks = UserDefaults.standard.dictionary(forKey: Self.projectBookmarksKey) as? [String: Data] {
-            self.projectBookmarks = savedBookmarks
-        }
+        // Restore recent project file URLs + their security-scoped
+        // bookmarks from UserDefaults. Centralised in
+        // `reloadRecentProjectsFromDefaults` so the cross-window
+        // observer below can re-trigger the same load when a peer
+        // window posts `recentProjectsDidChange`.
+        reloadRecentProjectsFromDefaults()
 
         // Flush any pending debounced persist when the app is about to terminate.
         // Prevents data loss when the user is mid-edit (300 ms window) and
@@ -844,6 +840,34 @@ final class SHAppViewModel {
                 Task { @MainActor in
                     self?.openOutput()
                 }
+            }
+        }
+
+        // Cross-window recents sync. When another view-model (a peer
+        // scratch window, or the primary in the inverse direction)
+        // writes to the shared `SHRecentProjects` / `SHProjectBookmarks`
+        // UserDefaults keys, it posts `recentProjectsDidChange` so we
+        // can refresh our in-memory copy and the `File → Otevřít
+        // nedávné…` menu reflects the new list without an app restart.
+        // We skip notifications we posted ourselves (identity check on
+        // `object`) — UserDefaults already holds the value we just
+        // mutated, so re-reading is wasted work.
+        //
+        // `MainActor.assumeIsolated` (not `Task { @MainActor in }`)
+        // because `queue: .main` already pins the block to the main
+        // thread / main actor. Avoiding the Task hop keeps the refresh
+        // synchronous with the post — important for tests and for
+        // tight save→display cycles where a queued Task could lag
+        // behind a UI redraw.
+        NotificationCenter.default.addObserver(
+            forName: Self.recentProjectsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let sender = notification.object as AnyObject?, sender === self { return }
+                self.reloadRecentProjectsFromDefaults()
             }
         }
     }
@@ -1357,6 +1381,16 @@ final class SHAppViewModel {
     private static let recentProjectsKey = "SHRecentProjects"
     private static let projectBookmarksKey = "SHProjectBookmarks"
 
+    /// Posted by any view-model after a successful write to the shared
+    /// recent-projects / project-bookmarks UserDefaults keys. Observed
+    /// by every other view-model so a save in a scratch window shows up
+    /// in the primary's `Otevřít nedávné…` menu (and vice versa)
+    /// without an app restart. The notification's `object` is the
+    /// posting view-model so receivers can skip their own posts.
+    static let recentProjectsDidChange = Notification.Name(
+        "DavidMasin.SpiceHarvester.recentProjectsDidChange"
+    )
+
     // MARK: – Recent projects
 
     /// Pushes a project URL onto `recentProjectURLs` (most recent first,
@@ -1364,9 +1398,19 @@ final class SHAppViewModel {
     /// bookmark so the URL stays openable after app restart. Without
     /// the bookmark, sandboxed `Data(contentsOf: url)` calls fail with
     /// permission error once the original NSOpenPanel session ends.
-    /// Scratch view-models skip the UserDefaults write — consistent
-    /// with prompt history and recent folders gating.
+    ///
+    /// Project-file metadata is **inherently global** (the disk artifact
+    /// exists for the whole user), so unlike prompt history / folder
+    /// recents this write happens from scratch view-models too. Before
+    /// mutating we resync from UserDefaults so a peer window's recent
+    /// addition doesn't get clobbered by our stale in-memory snapshot.
     private func rememberProjectURL(_ url: URL) {
+        // Pull latest from UserDefaults so we don't overwrite changes
+        // made by another window since our last reload. Without this,
+        // primary saves A, scratch saves B → scratch persists [B]
+        // (loses A) because scratch's in-memory list was [].
+        reloadRecentProjectsFromDefaults()
+
         let path = url.path
         recentProjectURLs.removeAll { $0.path == path }
         recentProjectURLs.insert(url, at: 0)
@@ -1393,7 +1437,6 @@ final class SHAppViewModel {
             projectBookmarks[path] = data
         }
 
-        guard persistenceMode == .persistent else { return }
         persistRecentProjectsAndBookmarks()
     }
 
@@ -1402,9 +1445,9 @@ final class SHAppViewModel {
     /// unreadable / not a project file) — keeping a dead path in the
     /// menu just produces repeat error alerts.
     private func forgetProjectURL(_ url: URL) {
+        reloadRecentProjectsFromDefaults()
         recentProjectURLs.removeAll { $0.path == url.path }
         projectBookmarks.removeValue(forKey: url.path)
-        guard persistenceMode == .persistent else { return }
         persistRecentProjectsAndBookmarks()
     }
 
@@ -1413,12 +1456,39 @@ final class SHAppViewModel {
     func clearRecentProjects() {
         recentProjectURLs.removeAll()
         projectBookmarks.removeAll()
-        guard persistenceMode == .persistent else { return }
         let recentKey = Self.recentProjectsKey
         let bookmarksKey = Self.projectBookmarksKey
+        let postName = Self.recentProjectsDidChange
+        let weakSelf = self
         Task.detached(priority: .utility) {
             UserDefaults.standard.removeObject(forKey: recentKey)
             UserDefaults.standard.removeObject(forKey: bookmarksKey)
+            // Hop to main for the post so observers (registered with
+            // `.main` queue) receive on the expected queue and so the
+            // `object` identity used for self-skip is stable.
+            await MainActor.run {
+                NotificationCenter.default.post(name: postName, object: weakSelf)
+            }
+        }
+    }
+
+    /// Re-reads `recentProjectURLs` + `projectBookmarks` from the shared
+    /// UserDefaults keys. Idempotent. Called from init (initial load)
+    /// AND from the cross-window observer when a peer view-model posts
+    /// `recentProjectsDidChange`. Also called before any mutation so we
+    /// merge over the latest persisted state instead of overwriting it.
+    private func reloadRecentProjectsFromDefaults() {
+        if let savedPaths = UserDefaults.standard.array(forKey: Self.recentProjectsKey) as? [String] {
+            self.recentProjectURLs = savedPaths
+                .prefix(Self.recentProjectsLimit)
+                .map { URL(fileURLWithPath: $0) }
+        } else {
+            self.recentProjectURLs = []
+        }
+        if let savedBookmarks = UserDefaults.standard.dictionary(forKey: Self.projectBookmarksKey) as? [String: Data] {
+            self.projectBookmarks = savedBookmarks
+        } else {
+            self.projectBookmarks = [:]
         }
     }
 
@@ -1454,9 +1524,7 @@ final class SHAppViewModel {
                 relativeTo: nil
             ) {
                 projectBookmarks[url.path] = fresh
-                if persistenceMode == .persistent {
-                    persistRecentProjectsAndBookmarks()
-                }
+                persistRecentProjectsAndBookmarks()
             }
         }
         let started = resolved.startAccessingSecurityScopedResource()
@@ -1466,12 +1534,19 @@ final class SHAppViewModel {
     /// Bundles the dual-write of `recentProjectURLs` + `projectBookmarks`
     /// into a single off-main task. Centralised so every callsite
     /// (remember / forget / stale refresh) persists both in lockstep.
+    /// After the write completes, broadcasts `recentProjectsDidChange`
+    /// so peer view-models (other windows) refresh their menus.
     private func persistRecentProjectsAndBookmarks() {
         let paths = recentProjectURLs.map { $0.path }
         let bookmarks = projectBookmarks
+        let postName = Self.recentProjectsDidChange
+        let sender = self
         Task.detached(priority: .utility) {
             UserDefaults.standard.set(paths, forKey: Self.recentProjectsKey)
             UserDefaults.standard.set(bookmarks, forKey: Self.projectBookmarksKey)
+            await MainActor.run {
+                NotificationCenter.default.post(name: postName, object: sender)
+            }
         }
     }
 
@@ -1658,6 +1733,23 @@ final class SHAppViewModel {
             // Open Recent click hit a dead path — drop it so the user
             // doesn't see the same error every time they open the menu.
             forgetProjectURL(url)
+            // Distinguish "file gone / corrupt" from "sandbox refused
+            // the read because we have no valid bookmark for this
+            // path". The latter happens primarily across app restarts
+            // when the original NSOpenPanel grant has expired and the
+            // stored bookmark either didn't exist or failed to resolve
+            // — the remediation is "re-pick via Cmd+O", not the
+            // generic Cocoa error text.
+            let nsError = error as NSError
+            let isPermissionError = nsError.domain == NSCocoaErrorDomain
+                && (nsError.code == NSFileReadNoPermissionError
+                    || nsError.code == NSFileNoSuchFileError
+                    || nsError.code == NSFileReadUnknownError)
+            if isPermissionError && !scoped.scopeStarted {
+                let mapped = SHProjectError.permissionDenied(url: url)
+                statusText = "Cesta vyžaduje re-grant — otevři projekt znovu (Cmd+O)"
+                return .failed(error: mapped)
+            }
             statusText = "Otevření projektu selhalo: \(error.localizedDescription)"
             return .failed(error: error)
         }
