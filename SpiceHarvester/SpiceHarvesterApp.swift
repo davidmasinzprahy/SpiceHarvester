@@ -19,10 +19,24 @@ struct ShowHelpFocusedKey: FocusedValueKey {
     typealias Value = Binding<Bool>
 }
 
+/// Published by every ContentView so menu commands operating on the
+/// view-model (Otevřít projekt, Uložit projekt, Otevřít nedávné…)
+/// can target the currently-focused window's vm rather than always
+/// the primary's. Same rationale as `ShowHelpFocusedKey` — without
+/// this routing, Open Recent in a scratch window would silently load
+/// the project into primary.
+struct FocusedViewModelKey: FocusedValueKey {
+    typealias Value = SHAppViewModel
+}
+
 extension FocusedValues {
     var showHelpBinding: Binding<Bool>? {
         get { self[ShowHelpFocusedKey.self] }
         set { self[ShowHelpFocusedKey.self] = newValue }
+    }
+    var focusedViewModel: SHAppViewModel? {
+        get { self[FocusedViewModelKey.self] }
+        set { self[FocusedViewModelKey.self] = newValue }
     }
 }
 
@@ -40,16 +54,29 @@ struct SpiceHarvesterApp: App {
     /// currently-focused window's help binding. Falls back to primary
     /// `showHelp` when no window publishes a binding (edge case).
     @FocusedValue(\.showHelpBinding) private var focusedShowHelp
+    /// Resolves to the focused window's view-model (primary or scratch).
+    /// Menu commands route through this so project ops act on the
+    /// expected window. Falls back to the App-level `vm` (primary) when
+    /// nothing is focused yet (e.g. at app launch before any window
+    /// has come to front).
+    @FocusedValue(\.focusedViewModel) private var focusedVM
     /// Environment hook to open the secondary "scratch" window from menu
     /// commands. Only available macOS 13+, which is below our deployment
     /// target so no @available guard needed.
     @Environment(\.openWindow) private var openWindow
 
+    /// View-model that menu commands should operate on — focused window
+    /// when one is up, primary as fallback. Centralised so every menu
+    /// item uses the same routing without scattering ternaries.
+    private var targetVM: SHAppViewModel { focusedVM ?? vm }
+
     /// Compact label for a recent-project URL shown in the
     /// `File → Otevřít nedávné…` submenu. Strips the redundant
     /// `.spiceharvester.json` suffix and tildeifies the parent path so
     /// `~/Documents/medical/foo.spiceharvester.json` reads as
-    /// `foo · ~/Documents/medical`.
+    /// `foo · ~/Documents/medical`. Long composites are truncated with
+    /// `…/lastFolder` so macOS doesn't render a 600 pt-wide menu when
+    /// the project lives in a deeply-nested external drive path.
     private func recentProjectMenuTitle(_ url: URL) -> String {
         var name = url.lastPathComponent
         if name.hasSuffix(".spiceharvester.json") {
@@ -59,13 +86,21 @@ struct SpiceHarvesterApp: App {
         }
         let parent = (url.deletingLastPathComponent().path as NSString)
             .abbreviatingWithTildeInPath
-        return "\(name) · \(parent)"
+        let combined = "\(name) · \(parent)"
+        guard combined.count > 64 else { return combined }
+        // Keep the project name in full, truncate the parent. macOS menu
+        // ellipsis convention: `…/lastSegment` preserves the most
+        // recognizable component (the project's containing folder).
+        let parentURL = URL(fileURLWithPath: parent)
+        let lastSegment = parentURL.lastPathComponent
+        return "\(name) · …/\(lastSegment)"
     }
 
     var body: some Scene {
         WindowGroup(id: "main") {
             ContentView(vm: vm, showHelp: $showHelp)
                 .focusedSceneValue(\.showHelpBinding, $showHelp)
+                .focusedSceneValue(\.focusedViewModel, vm)
         }
         // `.defaultSize` is the SwiftUI fallback for first-launch dimensions; the
         // AppDelegate below then adapts the actual launch frame to the current screen.
@@ -90,94 +125,98 @@ struct SpiceHarvesterApp: App {
                 Divider()
 
                 Button("Otevřít projekt…") {
-                    let outcome = vm.openProject()
+                    let outcome = targetVM.openProject()
                     SHAppDelegate.handleOpenProjectOutcome(outcome)
                 }
                 .keyboardShortcut("o", modifiers: .command)
-                .disabled(vm.isRunning)
+                .disabled(targetVM.isRunning)
 
-                // Open Recent submenu — fed by `vm.recentProjectURLs`,
-                // written on every saveProjectAs / openProject success.
-                // Click item → openProject(at:) bypasses NSOpenPanel.
+                // Open Recent submenu — fed by the focused vm's
+                // `recentProjectURLs`, written on every saveProjectAs /
+                // openProject success. Click → `openProject(at:)`
+                // bypasses NSOpenPanel and uses stored security-scoped
+                // bookmark so the read succeeds across app restarts.
                 Menu("Otevřít nedávné") {
-                    ForEach(Array(vm.recentProjectURLs.enumerated()), id: \.element) { _, url in
+                    ForEach(Array(targetVM.recentProjectURLs.enumerated()), id: \.element) { _, url in
                         Button(recentProjectMenuTitle(url)) {
-                            let outcome = vm.openProject(at: url)
+                            let outcome = targetVM.openProject(at: url)
                             SHAppDelegate.handleOpenProjectOutcome(outcome)
                         }
-                        .disabled(vm.isRunning)
+                        .disabled(targetVM.isRunning)
                     }
-                    if !vm.recentProjectURLs.isEmpty {
+                    if !targetVM.recentProjectURLs.isEmpty {
                         Divider()
                         Button("Vyčistit seznam") {
-                            vm.clearRecentProjects()
+                            targetVM.clearRecentProjects()
                         }
                     }
                 }
-                .disabled(vm.recentProjectURLs.isEmpty)
+                .disabled(targetVM.recentProjectURLs.isEmpty)
             }
 
             // File → Uložit projekt jako… (Cmd+Shift+S, placed after .saveItem)
             CommandGroup(after: .saveItem) {
                 Divider()
                 Button("Uložit projekt jako…") {
-                    _ = vm.saveProjectAs()
+                    _ = targetVM.saveProjectAs()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
-                .disabled(vm.isRunning || !vm.canSaveProject)
+                .disabled(targetVM.isRunning || !targetVM.canSaveProject)
 
                 Button("Otevřít výstup ve Finderu") {
-                    vm.openOutput()
+                    targetVM.openOutput()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
-                .disabled(!vm.canOpenOutput)
+                .disabled(!targetVM.canOpenOutput)
             }
 
             // ┌──────────────────────────────────────────────────────────┐
             // │ Pipeline menu — top-level menu for all run / stop /      │
             // │ mode / server actions. CommandMenu adds a custom menu    │
             // │ between Edit/View and Window in macOS native menu bar.   │
+            // │ Actions route through `targetVM` so a scratch window in  │
+            // │ focus controls its own pipeline, not the primary's.      │
             // └──────────────────────────────────────────────────────────┘
             CommandMenu("Pipeline") {
                 Button("Spustit") {
-                    Task { await vm.runAll() }
+                    Task { await targetVM.runAll() }
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(!vm.canRunAll || vm.isRunning)
+                .disabled(!targetVM.canRunAll || targetVM.isRunning)
 
                 Button("Přerušit") {
-                    vm.cancelRun()
+                    targetVM.cancelRun()
                 }
                 .keyboardShortcut(".", modifiers: .command)
-                .disabled(!vm.isRunning)
+                .disabled(!targetVM.isRunning)
 
                 Divider()
 
                 Button("Předzpracování") {
-                    Task { await vm.runPreprocessing() }
+                    Task { await targetVM.runPreprocessing() }
                 }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
-                .disabled(!vm.canRunPreprocessing || vm.isRunning)
+                .disabled(!targetVM.canRunPreprocessing || targetVM.isRunning)
 
                 Button("Extrakce") {
-                    Task { await vm.runExtraction() }
+                    Task { await targetVM.runExtraction() }
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(!vm.canRunExtraction || vm.isRunning)
+                .disabled(!targetVM.canRunExtraction || targetVM.isRunning)
 
                 Divider()
 
                 // Režim extrakce zkratky. Moved from .toolbar placement
                 // — mode is pipeline-behavior config, not view state.
-                Button("Režim FAST") { vm.config.extractionMode = .fast }
+                Button("Režim FAST") { targetVM.config.extractionMode = .fast }
                     .keyboardShortcut("1", modifiers: .command)
-                    .disabled(vm.isRunning)
-                Button("Režim SEARCH") { vm.config.extractionMode = .search }
+                    .disabled(targetVM.isRunning)
+                Button("Režim SEARCH") { targetVM.config.extractionMode = .search }
                     .keyboardShortcut("2", modifiers: .command)
-                    .disabled(vm.isRunning)
-                Button("Režim CONSOLIDATE") { vm.config.extractionMode = .consolidate }
+                    .disabled(targetVM.isRunning)
+                Button("Režim CONSOLIDATE") { targetVM.config.extractionMode = .consolidate }
                     .keyboardShortcut("3", modifiers: .command)
-                    .disabled(vm.isRunning)
+                    .disabled(targetVM.isRunning)
 
                 Divider()
 
@@ -186,9 +225,9 @@ struct SpiceHarvesterApp: App {
                 // user clicks Re-check, gets immediate green/red feedback
                 // instead of waiting up to 30 s for the next scheduled ping.
                 Button("Znovu ověřit zdraví serveru") {
-                    Task { await vm.recheckServerNow() }
+                    Task { await targetVM.recheckServerNow() }
                 }
-                .disabled(!vm.isSelectedServerVerified || vm.isRunning)
+                .disabled(!targetVM.isSelectedServerVerified || targetVM.isRunning)
             }
 
             CommandGroup(replacing: .help) {
@@ -250,6 +289,10 @@ struct SHScratchRoot: View {
             // resolves to it when this window is focused, not to the
             // primary's. See `ShowHelpFocusedKey` on the App scene.
             .focusedSceneValue(\.showHelpBinding, $showHelp)
+            // Same routing for project ops: Open Recent / Save Project
+            // / Open Project in menu now act on whichever window is
+            // focused, not the App-level primary.
+            .focusedSceneValue(\.focusedViewModel, vm)
     }
 }
 

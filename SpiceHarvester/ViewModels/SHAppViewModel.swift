@@ -219,6 +219,15 @@ final class SHAppViewModel {
     var recentProjectURLs: [URL] = []
     static let recentProjectsLimit: Int = 8
 
+    /// Security-scoped bookmarks for project file URLs, keyed by absolute
+    /// path. Kept **separately** from `SHAppConfig.folderBookmarks`
+    /// because that struct is intentionally wiped at launch (see README
+    /// "Persistence" — provozní vstupy se resetují). Project bookmarks
+    /// need to survive restart so `Otevřít nedávné` actually works — a
+    /// path string alone gives us nothing in a sandboxed app after the
+    /// session that issued the NSOpenPanel grant has ended.
+    private var projectBookmarks: [String: Data] = [:]
+
     /// Is the currently selected server's last verification still valid?
     var isSelectedServerVerified: Bool {
         guard let id = verifiedServerID, let current = selectedServer else { return false }
@@ -679,6 +688,13 @@ final class SHAppViewModel {
     /// server (URL edit, server switch) — `invalidateServerVerification`
     /// stops it and `verifyServer` restarts it on success.
     private var serverHealthTask: Task<Void, Never>?
+    /// Tracks the in-flight manual recheck triggered by Pipeline →
+    /// "Znovu ověřit zdraví serveru". Cancelled before a new recheck
+    /// starts so rapid clicks don't spawn N parallel pings; the LM
+    /// Studio server typically replies in <100 ms so the practical
+    /// race is small, but the gate avoids redundant retry chains
+    /// under flaky network.
+    private var manualHealthCheckTask: Task<Void, Never>?
     /// True for the brief window where a task is about to start – guards against
     /// back-to-back clicks racing past the `isRunning` flag.
     private var runEntered: Bool = false
@@ -775,6 +791,13 @@ final class SHAppViewModel {
             self.recentProjectURLs = savedPaths
                 .prefix(Self.recentProjectsLimit)
                 .map { URL(fileURLWithPath: $0) }
+        }
+
+        // Restore project security-scoped bookmarks. UserDefaults stores
+        // them as [String: Data] which Foundation rehydrates as
+        // [String: NSData] — explicit cast keeps Swift types tidy.
+        if let savedBookmarks = UserDefaults.standard.dictionary(forKey: Self.projectBookmarksKey) as? [String: Data] {
+            self.projectBookmarks = savedBookmarks
         }
 
         // Flush any pending debounced persist when the app is about to terminate.
@@ -1332,47 +1355,123 @@ final class SHAppViewModel {
 
     private static let promptHistoryKey = "SHPromptHistory"
     private static let recentProjectsKey = "SHRecentProjects"
+    private static let projectBookmarksKey = "SHProjectBookmarks"
 
     // MARK: – Recent projects
 
     /// Pushes a project URL onto `recentProjectURLs` (most recent first,
-    /// deduplicated by path, capped). Called from `saveProjectAs` and
-    /// `openProject` after success. Scratch view-models skip the write
-    /// to UserDefaults — consistent with prompt history and recent
-    /// folders gating.
+    /// deduplicated by path, capped) and stores a security-scoped
+    /// bookmark so the URL stays openable after app restart. Without
+    /// the bookmark, sandboxed `Data(contentsOf: url)` calls fail with
+    /// permission error once the original NSOpenPanel session ends.
+    /// Scratch view-models skip the UserDefaults write — consistent
+    /// with prompt history and recent folders gating.
     private func rememberProjectURL(_ url: URL) {
         let path = url.path
         recentProjectURLs.removeAll { $0.path == path }
         recentProjectURLs.insert(url, at: 0)
         if recentProjectURLs.count > Self.recentProjectsLimit {
+            // Drop oldest entries from the URL list, plus their bookmarks
+            // — keeps the bookmarks map from growing without bound for
+            // users who churn through many projects.
+            let evicted = recentProjectURLs.suffix(recentProjectURLs.count - Self.recentProjectsLimit)
+            for url in evicted {
+                projectBookmarks.removeValue(forKey: url.path)
+            }
             recentProjectURLs.removeLast(recentProjectURLs.count - Self.recentProjectsLimit)
         }
-        guard persistenceMode == .persistent else { return }
-        let paths = recentProjectURLs.map { $0.path }
-        Task.detached(priority: .utility) {
-            UserDefaults.standard.set(paths, forKey: Self.recentProjectsKey)
+
+        // Best-effort bookmark capture. Failure (e.g. user picked a path
+        // outside the sandbox grant chain) is silently logged via the
+        // missing key — Open Recent click later falls back to raw URL
+        // and lets the user see the permission error.
+        if let data = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) {
+            projectBookmarks[path] = data
         }
+
+        guard persistenceMode == .persistent else { return }
+        persistRecentProjectsAndBookmarks()
     }
 
-    /// Drops a project URL from the recent list. Called when openProject
-    /// hits a hard failure (file missing / unreadable) — keeping a dead
-    /// path in the menu just produces repeat error alerts.
+    /// Drops a project URL (and its bookmark) from the recent list.
+    /// Called when openProject hits a hard failure (file missing /
+    /// unreadable / not a project file) — keeping a dead path in the
+    /// menu just produces repeat error alerts.
     private func forgetProjectURL(_ url: URL) {
         recentProjectURLs.removeAll { $0.path == url.path }
+        projectBookmarks.removeValue(forKey: url.path)
         guard persistenceMode == .persistent else { return }
-        let paths = recentProjectURLs.map { $0.path }
-        Task.detached(priority: .utility) {
-            UserDefaults.standard.set(paths, forKey: Self.recentProjectsKey)
-        }
+        persistRecentProjectsAndBookmarks()
     }
 
     /// User-invoked clear from `File → Otevřít nedávné → Vyčistit`.
+    /// Drops both the URL list and all stored bookmarks.
     func clearRecentProjects() {
         recentProjectURLs.removeAll()
+        projectBookmarks.removeAll()
         guard persistenceMode == .persistent else { return }
-        let key = Self.recentProjectsKey
+        let recentKey = Self.recentProjectsKey
+        let bookmarksKey = Self.projectBookmarksKey
         Task.detached(priority: .utility) {
-            UserDefaults.standard.removeObject(forKey: key)
+            UserDefaults.standard.removeObject(forKey: recentKey)
+            UserDefaults.standard.removeObject(forKey: bookmarksKey)
+        }
+    }
+
+    /// Resolves a recent-project URL via its stored security-scoped
+    /// bookmark and returns the fresh URL the caller can then bracket
+    /// with `start/stopAccessingSecurityScopedResource`. Falls back to
+    /// the input URL when no bookmark is stored — the caller's read
+    /// will likely fail with permission error, which `openProject`
+    /// handles by removing the URL from the recents list.
+    ///
+    /// Returns `(url, scopeStarted)` so the caller can correctly
+    /// release the scope only if we actually started it.
+    private func acquireProjectScope(for url: URL) -> (url: URL, scopeStarted: Bool) {
+        guard let data = projectBookmarks[url.path] else {
+            return (url, false)
+        }
+        var isStale = false
+        guard let resolved = try? URL(
+            resolvingBookmarkData: data,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else {
+            // Bookmark unusable — drop it and fall back to plain URL.
+            projectBookmarks.removeValue(forKey: url.path)
+            return (url, false)
+        }
+        if isStale {
+            // Refresh the bookmark in-place so next launch has fresh data.
+            if let fresh = try? resolved.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            ) {
+                projectBookmarks[url.path] = fresh
+                if persistenceMode == .persistent {
+                    persistRecentProjectsAndBookmarks()
+                }
+            }
+        }
+        let started = resolved.startAccessingSecurityScopedResource()
+        return (resolved, started)
+    }
+
+    /// Bundles the dual-write of `recentProjectURLs` + `projectBookmarks`
+    /// into a single off-main task. Centralised so every callsite
+    /// (remember / forget / stale refresh) persists both in lockstep.
+    private func persistRecentProjectsAndBookmarks() {
+        let paths = recentProjectURLs.map { $0.path }
+        let bookmarks = projectBookmarks
+        Task.detached(priority: .utility) {
+            UserDefaults.standard.set(paths, forKey: Self.recentProjectsKey)
+            UserDefaults.standard.set(bookmarks, forKey: Self.projectBookmarksKey)
         }
     }
 
@@ -1392,15 +1491,25 @@ final class SHAppViewModel {
             statusText = "Server nejdřív ověř (Ověřit)"
             return
         }
-        statusText = "Kontroluji server…"
-        do {
-            let models = try await lmClient.fetchModels(server)
-            isVerifiedServerReachable = true
-            statusText = "Server dostupný · modely: \(models.count)"
-        } catch {
-            isVerifiedServerReachable = false
-            statusText = "Server odpojen: \(error.localizedDescription)"
+        // Cancel any in-flight manual recheck so successive menu clicks
+        // produce one ping, not a fan-out of retry chains.
+        manualHealthCheckTask?.cancel()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.statusText = "Kontroluji server…"
+            do {
+                let models = try await self.lmClient.fetchModels(server)
+                guard !Task.isCancelled else { return }
+                self.isVerifiedServerReachable = true
+                self.statusText = "Server dostupný · modely: \(models.count)"
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.isVerifiedServerReachable = false
+                self.statusText = "Server odpojen: \(error.localizedDescription)"
+            }
         }
+        manualHealthCheckTask = task
+        await task.value
     }
 
     // MARK: – Save / Load Project (pragmatic DocumentGroup substitute)
@@ -1473,15 +1582,29 @@ final class SHAppViewModel {
     /// known URL. If decoding fails (file missing, format invalid), the
     /// URL is removed from `recentProjectURLs` so the menu doesn't keep
     /// listing a dead entry.
+    ///
+    /// Acquires the security-scoped bookmark stored at remember time so
+    /// the read succeeds even across app restarts. The freshly-picked
+    /// case (saveProjectAs / openProject just ran in this session) also
+    /// works because the bookmark was just written.
     func openProject(at url: URL) -> SHOpenProjectOutcome {
+        let scoped = acquireProjectScope(for: url)
+        defer {
+            if scoped.scopeStarted {
+                scoped.url.stopAccessingSecurityScopedResource()
+            }
+        }
         do {
-            let data = try Data(contentsOf: url)
+            let data = try Data(contentsOf: scoped.url)
             // Wrap the decode in a project-shaped sniff so a friendly
             // error replaces the noisy `keyNotFound(...)` cascade when
             // the user picks a random JSON. Validates one canonical
             // marker (`schemaVersion`) before going for the full decode.
             guard let probe = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   probe["schemaVersion"] != nil else {
+                // Same self-healing as the catch block below — dead
+                // entries shouldn't keep haunting the Recent menu.
+                forgetProjectURL(url)
                 statusText = "Tento JSON není projekt Spice Harvester"
                 return .failed(error: SHProjectError.notAProject(url: url))
             }
