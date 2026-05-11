@@ -89,13 +89,48 @@ Aplikace přidává custom top-level menu **Pipeline** mezi standardní macOS me
 
 Po každém **Uložit projekt jako…** nebo **Otevřít projekt…** se cesta zaznamenává do persistentního seznamu (max 8). V submenu se zobrazují jako `název · cesta` (s tildeify, např. `medical · ~/Documents/projects`). Kliknutí přímo načte projekt — bez panel dialogu. Když cesta selže (soubor smazán), automaticky se ze seznamu odebere.
 
-## Shortcuts.app + Siri
+## Shortcuts.app + Siri (spouštění jako job)
 
-V macOS Shortcuts.app jsou registrované akce:
-- **Spustit SpiceHarvester** — spustí pipeline s aktuální konfigurací (jen v primary okně)
-- **Otevřít výstup SpiceHarvester** — otevře výstupní složku ve Finderu
+V macOS Zkratky.app jsou registrované akce:
 
-Frází: *„Spusť SpiceHarvester"* / *„Run SpiceHarvester"* / *„Otevři výstup z SpiceHarvester"*. Dostupné v Spotlight i Siri (macOS 14+).
+- **Spustit extrakci (Spice Harvester)** — spustí kompletní pipeline (Předzpracování + Extrakce). Akce **čeká na dokončení** a vrátí cestu k výslednému CSV — další krok ve Zkratce poběží teprve potom.
+- **Otevřít výstupní složku (Spice Harvester)** — otevře výstupní složku ve Finderu.
+
+Hlasem (Siri / Spotlight, macOS 14+): *„Spusť Spice Harvester"*, *„Run Spice Harvester"*, *„Otevři výstup Spice Harvester"*.
+
+### Volitelné parametry akce „Spustit extrakci"
+
+| Parametr | Co dělá | Pokud zůstane prázdné |
+|---|---|---|
+| **Režim** | Picker FAST / SEARCH / CONSOLIDATE — přepíše režim extrakce jen pro tento běh | Použije se režim aktuálně zvolený v aplikaci |
+| **Název promptu** | Filename z prompt složky (např. `lekarska-zprava.md`) — načte se před spuštěním. Tolerantní k velikosti písmen a `.md` suffix lze vynechat | Použije se prompt načtený v editoru |
+
+Vstupní/výstupní/cache/prompt složka, server a model se **vždy** berou z uložené konfigurace aplikace. (Důvod: macOS sandbox vyžaduje, aby cesty měly platný security-scoped bookmark; ten vzniká jedině když je uživatel vybere přes pickeer v aplikaci. Předání cesty parametrem v Zkratkách by sandbox stejně odmítl.)
+
+### Návratová hodnota
+
+Akce vrací **cestu k `results.csv`** v uložené výstupní složce. Dá se zřetězit:
+
+- *Připojit k mailu* → odešle CSV jako přílohu (denní reporting)
+- *Run Shell Script* → např. `git -C /repo commit -am "daily" && git push`
+- *Get File Contents* → vlož do tabulky / databáze
+- *Make Speak Text* → Siri přečte počet zpracovaných dokumentů
+
+Když pipeline selže nebo nevznikne CSV, akce vrátí krátký status string (např. `failed · 0` nebo `cancelled · 12`) a do dialogu zapíše čitelný popis.
+
+### Plánovaný job (cron-like)
+
+1. **Zkratky.app** → záložka **Automatizace** → ➕.
+2. Trigger: **Time of Day** (např. denně v 8:00) nebo **When I Open / Close an App**.
+3. Akce: **Spustit extrakci** + libovolně další kroky (mail, Slack, push do gitu…).
+4. Vypni **Ask Before Running** pro skutečně tichý běh.
+
+> ⚠️ **Než plánovaný job poprvé pustíš**, otevři aplikaci ručně a:
+> - Vyber všechny složky (Vstup / Výstup / Cache / Prompty) přes picker — sandbox si uloží bookmarky, které job potřebuje.
+> - Ověř server (klik na **Ověřit**).
+> - Pokud chceš v plánu zafixovaný režim/prompt, vyplň ho do parametrů akce; jinak job bude vždy brát to, co je v aplikaci aktuálně.
+
+Aplikace se při spuštění jobu probudí na popředí (`openAppWhenRun: true`). Můžeš ji minimalizovat nebo dát do druhého desktopu — pipeline poběží bez ohledu na fokus.
 
 ## Rychlý start
 

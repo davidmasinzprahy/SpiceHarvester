@@ -49,6 +49,10 @@ Jediný zdroj pravdy pro pojmenování v GUI, nápovědě (HelpSheet) a uživate
 | Pipeline menu | **Pipeline** (top-level v menu baru) | `CommandMenu("Pipeline")` | Sjednocené pro Spustit/Přerušit/Předzpracování/Extrakce/Režim/server recheck. Vzor: Xcode Product, Logic Track. |
 | Recent projects | **Otevřít nedávné** (File submenu) | `recentProjectURLs` | Max 8 položek, persistované v UserDefaults; dead path se auto-odebere. |
 | Manual server ping | **Znovu ověřit zdraví serveru** | `recheckServerNow()` | Mimo 30 s health watcher loop; pro okamžitou kontrolu po restartu LM Studia. |
+| Akce v Zkratky.app | **Spustit extrakci** / **Otevřít výstupní složku** | `RunSpiceHarvesterIntent`, `OpenOutputFolderIntent` | UI label v aplikaci Zkratky. Anglicky: `Run Spice Harvester`. |
+| Job / plánovaný běh | **job** (uživatelská dokumentace), v helpu **plánovaný běh** | — | Synonyma. Vždy myšleno spuštění přes Zkratky / Automation, ne cron na úrovni OS. |
+| Parametr akce | **parametr** | `@Parameter` | UI label v editoru Zkratky: **Režim** / **Název promptu**. |
+| Návratová hodnota akce | **výstup akce** (UI Zkratek) / **cesta k results.csv** | `ReturnsValue<String>` | Co dostane další krok ve Zkratce. |
 
 ## Kontrola konzistence
 

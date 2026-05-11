@@ -414,13 +414,39 @@ var isVerifiedServerReachable: Bool = true
 - `openProject() -> SHOpenProjectOutcome` — NSOpenPanel, sniff `schemaVersion` před decode (friendly error pro non-project JSON), `staleSandboxPaths(in:)` detekce + `successNeedsRepick` outcome.
 - Reset state: `lastCompletion = nil`, `progressState = .init()`, `cachedDocuments.removeAll()`, `dismissedConflictIDs.removeAll()`.
 
-#### AppIntents bridge
-Observers pro `SHIntentNotifications.runAll` / `.openOutput` registrovány **pouze v `.persistent` vm** — bez gate by každé scratch okno reagovalo paralelně:
+#### AppIntents bridge (Shortcuts.app jako job)
+
+Čtyři Notification kanály (`SHIntentNotifications.*`) tvoří kontrakt mezi `RunSpiceHarvesterIntent.perform()` (běží mimo SwiftUI graph) a `SHAppViewModel` (běží uvnitř):
+
+| Notification | Směr | UserInfo | Účel |
+|---|---|---|---|
+| `runAll` | intent → vm | — | Spustí `await runAll()` (po `applyParameters`) |
+| `openOutput` | intent → vm | — | Volá `openOutput()` |
+| `applyParameters` | intent → vm | `mode: String?`, `promptName: String?` | Per-run override mode + prompt PŘED `runAll` |
+| `runDidComplete` | vm → intent | `outcome`, `documentCount`, `csvPath`, `statusText` | Resume continuation v `perform()`, dá strukturovaný return |
+
+Observers `runAll` / `openOutput` / `applyParameters` registrovány **pouze v `.persistent` vm** — bez gate by každé scratch okno reagovalo paralelně:
 ```swift
 if #available(macOS 13.0, *), persistenceMode == .persistent {
     NotificationCenter.default.addObserver(...)
 }
 ```
+
+`runDidComplete` post je naopak **bez gate** — broadcast jde ven z každého vm, ale `RunSpiceHarvesterIntent` registruje observer s `object: nil` jen pro jednu invocaci, takže potkat se může jen s `.persistent` vm (`runAll` poslouchá taky jen ten).
+
+`SHRunSummaryPayload` v `SHAppIntents.swift` je private struct — vm assembluje primitivy do `userInfo` dict, intent decoduje zpět. CSV cesta = `outputURL.appendingPathComponent("results.csv")` (filename hardcoded v `SHExportService.exportAll`).
+
+`perform()` čeká přes `withCheckedContinuation` — observer registrace BEFORE `runAll` post (synchronní v continuation closure), takže cache-only sub-secondový běh neunikne. Token observeru drží `SHObserverTokenBox` (`@unchecked Sendable` class) — jinak `@Sendable` closure tripuje "mutated after capture" warning.
+
+`applyIntentParameters` v vm:
+- `mode: SHExtractionMode(rawValue: ...)` → `config.extractionMode`
+- `promptName` → `availablePromptFiles.first { lowercased match s tolerance na .md suffix }` → `loadPromptFile(URL)`
+- Sandbox grant pro vstupní/výstupní složku se neřeší — beru existující bookmarky z `config.folderBookmarks`. Cesta předaná z Zkratek by stejně sandbox grant nedostala.
+
+Tracking fields v vm:
+- `lastRunDocumentCount: Int` — set v `performExtraction` po `pipeline.run` (results.count)
+- `lastRunCSVPath: String` — set v `performExtraction` po `exportAll`
+- Reset na `0` / `""` na začátku `executeRun` ať `.notStarted` / `.failed` outcome neneseš starý summary
 
 #### Důležité chování
 - `runExtraction()` automaticky spustí předzpracování, pokud ještě nejsou data v paměti

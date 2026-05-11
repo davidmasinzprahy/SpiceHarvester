@@ -63,7 +63,7 @@ Výchozí režim je **FAST** (bez embeddingů).
 - **Health watcher** — 30 s ambient ping na `/v1/models` po Ověřit; status pill zčervená při disconnectu
 - **Server URL inline validace** — ⚠️ ikona u malformed Base URL bez čekání na Ověřit
 - **Notification Center** na completion (success/cancelled/failed) s akcí "Otevřít výstup"
-- **AppIntents** pro Shortcuts.app + Spotlight + Siri (`Spusť SpiceHarvester`, `Otevři výstup SpiceHarvester`)
+- **Shortcuts.app jako plnohodnotný job** — `Spustit extrakci` s parametry (režim, název promptu), čeká na dokončení a vrátí cestu k `results.csv` pro řetězení s dalšími akcemi (mail, Slack, git push…). Plánovatelné přes Automation tab. + Spotlight + Siri
 - **Window position persistence** — manuální resize/move přežívá restart
 - **Status bar** auto-collapse když není runtime status
 - **VSplitView** s tažitelnými dělítky mezi Prompt / Průběh / Log

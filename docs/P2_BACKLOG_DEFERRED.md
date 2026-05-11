@@ -9,7 +9,7 @@ implementace, scope a očekávaný čas. Slouží jako vstup pro budoucí ticket
 | Položka | Stav |
 |---|---|
 | Lokalizace (String Catalog) | ✅ Hotovo |
-| AppIntents pro Shortcuts | ✅ Hotovo |
+| AppIntents pro Shortcuts | ✅ Hotovo + parametry + wait + structured return (CSV cesta) |
 | Save / Load Project commands (interim za DocumentGroup) | ✅ Hotovo |
 | Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo (minimal) |
 | Quick Look provider source | 🟡 Source ready, target chybí |
@@ -233,7 +233,7 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 | Položka | Stav | Commit |
 |---|---|---|
 | Lokalizace (String Catalog) | ✅ Hotovo | viz `Localizable.xcstrings` |
-| AppIntents pro Shortcuts | ✅ Hotovo | viz `AppIntents/SHAppIntents.swift` |
+| AppIntents pro Shortcuts | ✅ Hotovo + job semantics | `RunSpiceHarvesterIntent` má `@Parameter mode` + `@Parameter promptName`, čeká na completion přes `runDidComplete`, vrací `ReturnsValue<String>` (cesta k `results.csv`); viz `AppIntents/SHAppIntents.swift` |
 | Settings search | ✅ Hotovo | předchozí commit |
 | Dynamic Type clamp | ✅ Hotovo | předchozí commit |
 | NSTextView log + severity coloring | ✅ Hotovo | předchozí commit |

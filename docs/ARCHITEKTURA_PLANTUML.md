@@ -19,7 +19,7 @@ package "UI" {
   [SettingsView\n(Settings scene + custom tab selector\nVýkon/OCR/Cache + search)] as SET
   [HelpSheet] as HELP
   [SHLogTextView\n(NSViewRepresentable\nNSTextView severity coloring)] as LOGV
-  [SHAppIntents\n(RunIntent / OpenOutputIntent\nAppShortcutsProvider)] as INTENTS
+  [SHAppIntents\n(RunIntent + parametry + wait\nOpenOutputIntent\nAppShortcutsProvider)\napplyParameters / runDidComplete bridge] as INTENTS
 }
 
 package "Presentation" {

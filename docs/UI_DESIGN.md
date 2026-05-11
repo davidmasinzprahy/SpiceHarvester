@@ -1066,11 +1066,20 @@ Po Verify se spustí 30 s ping loop na `/v1/models`. Failure flippe `isVerifiedS
 Po dokončení runu (jen když `!NSApp.isActive`) post UNNotificationRequest s `categoryIdentifier = SHCompletionNotification.categoryID`. Akce:
 - "Otevřít výstup" (`OPEN_OUTPUT` action ID, `.foreground`) → SHAppDelegate routes na `SHIntentNotifications.openOutput` → primary vm `openOutput()`.
 
-### 29.14 AppIntents (Shortcuts.app integration)
-- `RunSpiceHarvesterIntent` — `openAppWhenRun = true`, postne `SHIntentNotifications.runAll`
-- `OpenOutputFolderIntent` — postne `SHIntentNotifications.openOutput`
+### 29.14 AppIntents (Shortcuts.app jako job)
+- `RunSpiceHarvesterIntent` — `openAppWhenRun = true`, parametrizovaný + čeká na dokončení:
+  - `@Parameter mode: SHExtractionModeIntent?` (AppEnum mirror SHExtractionMode — picker FAST/SEARCH/CONSOLIDATE)
+  - `@Parameter promptName: String?` (lookup v `availablePromptFiles`, tolerance na case + `.md` suffix)
+  - `ReturnsValue<String>`: cesta k `results.csv` (lze zřetězit s další akcí ve Zkratce)
+  - `ProvidesDialog`: Siri / banner text
+  - `perform()` ČEKÁ na completion notifikaci přes `withCheckedContinuation` — observer registrován BEFORE `runAll` post, token v `SHObserverTokenBox` (`@unchecked Sendable` class)
+- `OpenOutputFolderIntent` — postne `SHIntentNotifications.openOutput` (beze změny)
 - `SpiceHarvesterShortcuts: AppShortcutsProvider` registruje fráze v Shortcuts/Spotlight/Siri
-- Observers pouze v primary vm (`persistenceMode == .persistent` gate) — scratch okna nereagují
+- `SHIntentNotifications`:
+  - `runAll`, `openOutput` (intent → vm; observer gate `persistenceMode == .persistent`)
+  - `applyParameters` (intent → vm; userInfo `mode`/`promptName`; `MainActor.assumeIsolated` synchronní apply)
+  - `runDidComplete` (vm → intent; userInfo `outcome` + `documentCount` + `csvPath` + `statusText`)
+- vm tracking: `lastRunDocumentCount: Int` + `lastRunCSVPath: String`, set v `performExtraction` po `exportAll`, reset na začátku `executeRun`
 
 ### 29.15 Save / Open Project
 - `SHProjectSnapshot: Codable` (top-level v Models layer kontextu) — folders + model picks + mode + prompt + lastLoadedPromptName
