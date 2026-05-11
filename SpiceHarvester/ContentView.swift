@@ -4,9 +4,13 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Bindable var vm: SHAppViewModel
-    /// Owned by the App scene so the Help command (Cmd+?) can flip the same
-    /// flag the toolbar button does.
-    @Binding var showHelp: Bool
+    /// Opens auxiliary windows (`help`). Help lives in its own scene
+    /// (not a `.sheet`) so it doesn't get trapped behind the active
+    /// tab when the user has tabbed several SpiceHarvester windows
+    /// together — a `.sheet` attaches to the parent NSWindow, which
+    /// in a tabbed group is shared across tabs and produces the
+    /// "Help shows on every tab" symptom.
+    @Environment(\.openWindow) private var openWindow
 
     /// Conflict pending user confirmation. `nil` = no dialog shown. When set,
     /// a `.confirmationDialog` asks the user whether to apply the banner's
@@ -159,9 +163,6 @@ struct ContentView: View {
             if isNow && promptFullscreen {
                 promptFullscreen = false
             }
-        }
-        .sheet(isPresented: $showHelp) {
-            HelpSheet(dismiss: { showHelp = false })
         }
         .background {
             LinearGradient(
@@ -387,7 +388,7 @@ struct ContentView: View {
             .help("Otevřít složku výstupu ve Finderu (Cmd+Shift+O) · drag → Finder / Slack / Mail")
 
             Button {
-                showHelp = true
+                openWindow(id: "help")
             } label: {
                 Label("Nápověda", systemImage: "questionmark.circle")
             }

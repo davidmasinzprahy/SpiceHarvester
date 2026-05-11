@@ -9,31 +9,16 @@ import SwiftUI
 import AppKit
 import UserNotifications
 
-/// `FocusedValueKey` published by every ContentView (primary + scratch).
-/// Its value is the binding to that window's `showHelp` flag, so the
-/// Help command can toggle the *focused* window's sheet rather than
-/// always toggling the primary window's. Without this, Cmd+? from a
-/// scratch window opened the primary's help sheet — coordination
-/// violation across windows.
-struct ShowHelpFocusedKey: FocusedValueKey {
-    typealias Value = Binding<Bool>
-}
-
 /// Published by every ContentView so menu commands operating on the
 /// view-model (Otevřít projekt, Uložit projekt, Otevřít nedávné…)
 /// can target the currently-focused window's vm rather than always
-/// the primary's. Same rationale as `ShowHelpFocusedKey` — without
-/// this routing, Open Recent in a scratch window would silently load
-/// the project into primary.
+/// the primary's. Without this routing, Open Recent in a scratch
+/// window would silently load the project into primary.
 struct FocusedViewModelKey: FocusedValueKey {
     typealias Value = SHAppViewModel
 }
 
 extension FocusedValues {
-    var showHelpBinding: Binding<Bool>? {
-        get { self[ShowHelpFocusedKey.self] }
-        set { self[ShowHelpFocusedKey.self] = newValue }
-    }
     var focusedViewModel: SHAppViewModel? {
         get { self[FocusedViewModelKey.self] }
         set { self[FocusedViewModelKey.self] = newValue }
@@ -49,11 +34,6 @@ struct SpiceHarvesterApp: App {
     /// have their own per-window view-model so configurations don't fight
     /// over the same UserDefaults slot.
     @State private var vm = SHAppViewModel()
-    @State private var showHelp = false
-    /// `@FocusedValue` so the Help command in `.commands` can read the
-    /// currently-focused window's help binding. Falls back to primary
-    /// `showHelp` when no window publishes a binding (edge case).
-    @FocusedValue(\.showHelpBinding) private var focusedShowHelp
     /// Resolves to the focused window's view-model (primary or scratch).
     /// Menu commands route through this so project ops act on the
     /// expected window. Falls back to the App-level `vm` (primary) when
@@ -98,8 +78,7 @@ struct SpiceHarvesterApp: App {
 
     var body: some Scene {
         WindowGroup(id: "main") {
-            ContentView(vm: vm, showHelp: $showHelp)
-                .focusedSceneValue(\.showHelpBinding, $showHelp)
+            ContentView(vm: vm)
                 .focusedSceneValue(\.focusedViewModel, vm)
         }
         // `.defaultSize` is the SwiftUI fallback for first-launch dimensions; the
@@ -239,15 +218,15 @@ struct SpiceHarvesterApp: App {
 
             CommandGroup(replacing: .help) {
                 Button("Nápověda Spice Harvester") {
-                    // Toggle the currently-focused window's help binding
-                    // when we have one (multi-window scenario); fall back
-                    // to the primary's binding so Cmd+? at app launch
-                    // (no window focused yet) still works.
-                    if let focusedShowHelp {
-                        focusedShowHelp.wrappedValue = true
-                    } else {
-                        showHelp = true
-                    }
+                    // Help lives in its own WindowGroup so the macOS
+                    // window manager treats it as a standalone window
+                    // — when the user has tabbed multiple
+                    // SpiceHarvester windows together, a sheet would
+                    // attach to the shared parent NSWindow and bleed
+                    // into every tab. A separate window also gives
+                    // the user the option to keep help open
+                    // side-by-side while working.
+                    openWindow(id: "help")
                 }
                 .keyboardShortcut("?", modifiers: .command)
             }
@@ -271,14 +250,27 @@ struct SpiceHarvesterApp: App {
             SHScratchRoot()
         }
         .defaultSize(width: 1180, height: 980)
+
+        // Help window — separate scene so it lives independently of
+        // any tabbed group. `WindowGroup` without a `for:` parameter
+        // is a singleton (macOS reuses the existing window when
+        // `openWindow(id: "help")` fires while it's already open),
+        // so the user gets at most one help window regardless of how
+        // many tabs they have.
+        WindowGroup(id: "help") {
+            HelpWindowView()
+        }
+        .defaultSize(width: 760, height: 720)
+        // `.contentOnly` style hides the standard title bar text /
+        // toolbar — Help has its own custom header with a close
+        // button, no need to duplicate.
+        .windowResizability(.contentSize)
     }
 }
 
 /// Hosts a scratch ContentView with its own view-model. Doesn't persist
 /// config back to UserDefaults — see the rationale on the `Nové okno`
-/// menu item. Help sheet flag is local because the primary window's
-/// help-flag would be a coordination headache across windows for no
-/// real benefit (each window can show its own help if requested).
+/// menu item.
 ///
 /// `@State` initializer is lazy on macOS 14+/iOS 17+ — the
 /// `SHAppViewModel(persistenceMode: .scratch)` expression evaluates once
@@ -288,14 +280,9 @@ struct SpiceHarvesterApp: App {
 /// the `@State var vm: SHAppViewModel?` + `.onAppear` workaround.
 struct SHScratchRoot: View {
     @State private var vm = SHAppViewModel(persistenceMode: .scratch)
-    @State private var showHelp = false
 
     var body: some View {
-        ContentView(vm: vm, showHelp: $showHelp)
-            // Publish this scratch window's help binding so Cmd+?
-            // resolves to it when this window is focused, not to the
-            // primary's. See `ShowHelpFocusedKey` on the App scene.
-            .focusedSceneValue(\.showHelpBinding, $showHelp)
+        ContentView(vm: vm)
             // Same routing for project ops: Open Recent / Save Project
             // / Open Project in menu now act on whichever window is
             // focused, not the App-level primary.

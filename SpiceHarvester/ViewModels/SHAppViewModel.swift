@@ -415,21 +415,36 @@ final class SHAppViewModel {
     }
 
     /// Optional subtitle line shown under the window title (macOS
-    /// title bar supports primary + secondary text). Surfaces the
-    /// current run mode + live progress when running, otherwise the
-    /// last-completed counts. Empty string = subtitle hidden.
+    /// title bar supports primary + secondary text). Composes:
+    /// `{server name} · {mode} · {progress | last-result}`. Server
+    /// name is the always-visible discriminator — when the user
+    /// runs different LM Studio / MLX instances in different tabs,
+    /// the title bar tells them at a glance which tab points
+    /// where (and lets them pair tabs with distinct hardware to
+    /// achieve real parallelism instead of queueing on one server).
     var windowSubtitle: String {
+        var parts: [String] = []
+        if let server = selectedServer {
+            // Server.name when set; otherwise fall back to host portion
+            // of the base URL so generic "Local LM Studio" entries
+            // don't all read identically in the bar.
+            let trimmed = server.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = trimmed.isEmpty
+                ? (URL(string: server.baseURL)?.host ?? server.baseURL)
+                : trimmed
+            parts.append(label)
+        }
         if isRunning {
             let modeLabel = config.extractionMode.title
             if progressState.counters.foundPDFs > 0 {
-                return "\(modeLabel) · \(progressState.counters.completed) / \(progressState.counters.foundPDFs)"
+                parts.append("\(modeLabel) · \(progressState.counters.completed) / \(progressState.counters.foundPDFs)")
+            } else {
+                parts.append("\(modeLabel) · běží")
             }
-            return "\(modeLabel) · běží"
+        } else if lastRunDocumentCount > 0 {
+            parts.append("Hotovo · \(lastRunDocumentCount) dokumentů")
         }
-        if lastRunDocumentCount > 0 {
-            return "Hotovo · \(lastRunDocumentCount) dokumentů"
-        }
-        return ""
+        return parts.joined(separator: " · ")
     }
 
     private var hasModelParameters: Bool {
@@ -889,26 +904,15 @@ final class SHAppViewModel {
         // parallel — N copies of the pipeline competing for the same LM
         // Studio server, racing to write the same output folder.
         if #available(macOS 13.0, *), persistenceMode == .persistent {
-            NotificationCenter.default.addObserver(
-                forName: SHIntentNotifications.runAll,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    // Guard reject (no input/server/model OR already
-                    // running) MUST still broadcast `runDidComplete`,
-                    // otherwise an awaiting Shortcuts.app intent
-                    // continuation hangs forever. Surface the reject
-                    // as `notStarted` outcome so the dialog text in
-                    // the Shortcut reads `nespuštěno · <status>`.
-                    guard !self.isRunning, self.canRunAll else {
-                        self.broadcastRunDidComplete(outcome: .notStarted)
-                        return
-                    }
-                    await self.runAll()
-                }
-            }
+            // Only `openOutput` remains routed via NotificationCenter:
+            // `SHAppDelegate.userNotificationCenter(_:didReceive:...)`
+            // (the UN action button on completion banners) has no
+            // direct vm reference, so the notification bridge stays.
+            // `runAll` / `applyParameters` / `runDidComplete` moved
+            // to direct method calls via `SHAppViewModel.runFromIntent`
+            // — removed the NotificationCenter dance that had two
+            // races: (1) primary + scratch claiming the same broadcast,
+            // (2) the intent observer matching the wrong vm's reply.
             NotificationCenter.default.addObserver(
                 forName: SHIntentNotifications.openOutput,
                 object: nil,
@@ -916,21 +920,6 @@ final class SHAppViewModel {
             ) { [weak self] _ in
                 Task { @MainActor in
                     self?.openOutput()
-                }
-            }
-            // Per-run parameter overrides from Shortcuts.app. Posted
-            // BEFORE `runAll` so the mutated `config` is what
-            // `runAll` reads. Synchronous on the main queue
-            // (`MainActor.assumeIsolated`) — no Task hop — to keep
-            // the apply→post→run sequence in one frame.
-            NotificationCenter.default.addObserver(
-                forName: SHIntentNotifications.applyParameters,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.applyIntentParameters(notification.userInfo ?? [:])
                 }
             }
         }
@@ -962,6 +951,16 @@ final class SHAppViewModel {
                 self.reloadRecentProjectsFromDefaults()
             }
         }
+
+        // Register in the process-wide live registry so a
+        // `RunSpiceHarvesterIntent` (Shortcuts.app) can locate this
+        // vm by its input-folder name and call `runAll` directly.
+        // `NSHashTable.weakObjects()` auto-removes the entry on
+        // dealloc — no manual unregister in deinit. Must happen
+        // AFTER all stored properties are initialized; `Self.liveRegistry.add(self)`
+        // passes `self` which Swift won't allow before init completes
+        // its property assignments.
+        Self.liveRegistry.add(self)
     }
 
     var selectedServerIndex: Int {
@@ -2091,6 +2090,22 @@ final class SHAppViewModel {
             statusText = "Úloha už běží"
             return
         }
+        // Cross-tab collision check: when the user has multiple
+        // SpiceHarvester windows pointing at the same výstupní
+        // složka, running both pipelines simultaneously would let
+        // them overwrite each other's `results.csv` and interleave
+        // partial JSONs. Block the second run with a clear message
+        // and let the user either wait, cancel the other tab, or
+        // point this tab at a different output folder.
+        let normalizedOutput = Self.normalizeOutputPath(config.outputFolder)
+        if !normalizedOutput.isEmpty {
+            if let claimant = Self.activeOutputClaims[normalizedOutput], claimant !== self {
+                let title = claimant.windowTitle
+                statusText = "Výstupní složka je zaneprázdněná jinou záložkou (\(title)) — počkej, nebo zvol jinou."
+                return
+            }
+            Self.activeOutputClaims[normalizedOutput] = self
+        }
         // Clear any stale badge from a previous run.
         lastCompletion = nil
         // Reset summary fields so a `.notStarted` (pre-condition fail)
@@ -2133,48 +2148,125 @@ final class SHAppViewModel {
             postCompletionNotification(for: outcome)
         }
 
-        broadcastRunDidComplete(outcome: outcome)
+        // Release the output-folder claim so the next run in any tab
+        // (this one or another) can proceed. Guard on identity in
+        // case the user changed `outputFolder` mid-run via Settings
+        // — we should only release a claim we actually placed.
+        if !normalizedOutput.isEmpty, Self.activeOutputClaims[normalizedOutput] === self {
+            Self.activeOutputClaims.removeValue(forKey: normalizedOutput)
+        }
 
         isRunning = false
         runEntered = false
         currentTask = nil
     }
 
-    /// Posts `SHIntentNotifications.runDidComplete` with the latest
-    /// summary so an awaiting `RunSpiceHarvesterIntent` (Shortcuts.app)
-    /// can resume its continuation. **Gated to `.persistent` vm** —
-    /// scratch windows don't participate in the intent contract and
-    /// their concurrent runs would otherwise race with the primary's
-    /// post (intent observer takes the first matching notification
-    /// regardless of source vm). Called from two sites:
-    ///   - end of `executeRun` (normal completion path)
-    ///   - intent `runAll` observer when `canRunAll` guard rejects
-    ///     (otherwise the intent's continuation would hang forever
-    ///     because `executeRun` never runs)
-    fileprivate func broadcastRunDidComplete(outcome: SHRunOutcome) {
-        guard persistenceMode == .persistent else { return }
-        // Restore intent-driven config overrides BEFORE the post so
-        // by the time the awaiting Shortcut continuation resumes, the
-        // app's persisted state is back to pre-Shortcut values. The
-        // restore is a no-op when no override was applied.
-        restoreIntentOverridesIfNeeded()
-        let outcomeRaw: String
-        switch outcome {
-        case .success: outcomeRaw = "success"
-        case .cancelled: outcomeRaw = "cancelled"
-        case .failed: outcomeRaw = "failed"
-        case .notStarted: outcomeRaw = "notStarted"
+    /// Path → vm registry of output folders currently being written
+    /// by an active run. Read + mutated only on the main actor (vm
+    /// is `@MainActor`-isolated and so is this static), so a plain
+    /// dictionary suffices — no `Lock` / `Mutex` needed. Held
+    /// `weak`-ish via class identity: if a vm goes away mid-run its
+    /// entry just becomes a dangling key, but `executeRun`'s identity
+    /// check (`claimant !== self`) only blocks live claimants, so
+    /// stale entries are self-healing on next run attempt.
+    @MainActor private static var activeOutputClaims: [String: SHAppViewModel] = [:]
+
+    /// Process-wide weak registry of every live SHAppViewModel.
+    /// Populated in `init`, auto-pruned on dealloc (weak refs).
+    /// Consumed by `runFromIntent` so a Shortcuts.app AppIntent can
+    /// target a specific window/tab by its input-folder name instead
+    /// of always firing on the primary vm.
+    @MainActor static let liveRegistry: NSHashTable<SHAppViewModel> = .weakObjects()
+
+    /// Entry point for `RunSpiceHarvesterIntent`. Replaces the
+    /// previous NotificationCenter dance (post `applyParameters`,
+    /// post `runAll`, await `runDidComplete`) with a direct method
+    /// call on the resolved target vm. Direct call eliminates two
+    /// races:
+    ///   1. Multiple vms claiming the same `runAll` broadcast
+    ///   2. Intent observer matching the wrong vm's `runDidComplete`
+    ///
+    /// Target resolution:
+    ///   - `inputFolderName` is set → first live vm whose
+    ///     `config.inputFolder` lastPathComponent matches
+    ///     (case-insensitive). Returns `notStarted` with explanation
+    ///     when no match is found.
+    ///   - `inputFolderName` is nil → falls back to the `.persistent`
+    ///     (primary) vm. Behaviour is the same as the pre-refactor
+    ///     intent, which only ever spoke to primary.
+    ///
+    /// Per-run overrides (mode / prompt) are applied via the existing
+    /// snapshot/restore mechanism so the user's GUI state isn't
+    /// permanently mutated by a Shortcut.
+    @MainActor
+    static func runFromIntent(
+        targetFolder: String?,
+        mode: String?,
+        promptName: String?
+    ) async -> (outcome: String, documentCount: Int, csvPath: String, statusText: String) {
+        let resolved = resolveIntentTarget(targetFolder: targetFolder)
+        guard let vm = resolved.vm else {
+            return ("notStarted", 0, "", resolved.failureMessage ?? "Cílová záložka nenalezena")
         }
-        NotificationCenter.default.post(
-            name: SHIntentNotifications.runDidComplete,
-            object: self,
-            userInfo: [
-                "outcome": outcomeRaw,
-                "documentCount": lastRunDocumentCount,
-                "csvPath": lastRunCSVPath,
-                "statusText": statusText
-            ]
-        )
+        var overrides: [String: Any] = [:]
+        if let mode { overrides["mode"] = mode }
+        if let promptName { overrides["promptName"] = promptName }
+        if !overrides.isEmpty {
+            vm.applyIntentParameters(overrides)
+        }
+        guard !vm.isRunning, vm.canRunAll else {
+            // Roll back any override we just snapshot-applied so the
+            // user's UI doesn't keep a phantom prompt/mode swap.
+            vm.restoreIntentOverridesIfNeeded()
+            return ("notStarted", 0, "", vm.toolbarReadyText)
+        }
+        await vm.runAll()
+        // Restore overrides — same lifecycle as the old
+        // `broadcastRunDidComplete` did, but now triggered locally
+        // since we don't go through NotificationCenter.
+        vm.restoreIntentOverridesIfNeeded()
+        let outcomeStr: String
+        switch vm.lastCompletion {
+        case .success?: outcomeStr = "success"
+        case .cancelled?: outcomeStr = "cancelled"
+        case .failed?: outcomeStr = "failed"
+        case .none: outcomeStr = "notStarted"
+        }
+        return (outcomeStr, vm.lastRunDocumentCount, vm.lastRunCSVPath, vm.statusText)
+    }
+
+    /// Looks up the vm an intent invocation should run on.
+    /// Tuple's `failureMessage` is non-nil when no vm matched and we
+    /// want a specific user-facing explanation (e.g. "the folder X
+    /// isn't loaded in any tab").
+    @MainActor
+    private static func resolveIntentTarget(
+        targetFolder: String?
+    ) -> (vm: SHAppViewModel?, failureMessage: String?) {
+        let live = liveRegistry.allObjects
+        if let target = targetFolder?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !target.isEmpty {
+            for vm in live {
+                let name = (vm.config.inputFolder as NSString).lastPathComponent
+                if name.compare(target, options: .caseInsensitive) == .orderedSame {
+                    return (vm, nil)
+                }
+            }
+            return (nil, "Žádná otevřená záložka nemá vstupní složku: \(target)")
+        }
+        // No target → primary fallback (backward-compatible behavior
+        // with pre-targeting intent invocations).
+        let primary = live.first { $0.persistenceMode == .persistent }
+        return (primary, primary == nil ? "Hlavní okno není dostupné" : nil)
+    }
+
+    /// Canonical form of a path string for collision matching:
+    /// strips trailing slash, resolves `~`, removes `.`/`..` segments.
+    /// Empty input → empty output (caller's guard for "no folder set").
+    private static func normalizeOutputPath(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return (trimmed as NSString).standardizingPath
     }
 
     // MARK: – Notification Center

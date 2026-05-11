@@ -163,3 +163,18 @@ struct HelpSheet: View {
         }
     }
 }
+
+/// Top-level wrapper for the Help WindowGroup. Uses
+/// `@Environment(\.dismissWindow)` so the embedded `HelpSheet`'s
+/// close button (and the custom Cmd+W shortcut macOS gives every
+/// SwiftUI window) shuts the window cleanly. A separate window
+/// (rather than a `.sheet` on ContentView) keeps Help isolated
+/// from tabbed-window grouping — a `.sheet` on a tabbed window
+/// attaches to the parent NSWindow and appears across every tab.
+struct HelpWindowView: View {
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        HelpSheet(dismiss: { dismissWindow(id: "help") })
+    }
+}
