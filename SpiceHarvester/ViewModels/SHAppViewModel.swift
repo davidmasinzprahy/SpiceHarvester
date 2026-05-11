@@ -211,6 +211,14 @@ final class SHAppViewModel {
     var recentFolders: [SHFolderKind: [String]] = [:]
     static let recentFoldersLimit: Int = 5
 
+    /// Recently-touched `.spiceharvester.json` project files (both saved
+    /// via Cmd+Shift+S and opened via Cmd+O). Drives the
+    /// `File → Otevřít nedávné…` submenu so users don't have to
+    /// re-navigate the open panel for their 5–8 most active projects.
+    /// Most recent first, deduped, capped at `recentProjectsLimit`.
+    var recentProjectURLs: [URL] = []
+    static let recentProjectsLimit: Int = 8
+
     /// Is the currently selected server's last verification still valid?
     var isSelectedServerVerified: Bool {
         guard let id = verifiedServerID, let current = selectedServer else { return false }
@@ -756,6 +764,17 @@ final class SHAppViewModel {
             if let saved = UserDefaults.standard.array(forKey: key) as? [String] {
                 self.recentFolders[kind] = Array(saved.prefix(Self.recentFoldersLimit))
             }
+        }
+
+        // Restore recent project file URLs. Stored as path strings (URLs
+        // don't survive Codable cleanly across sandbox boundaries), then
+        // re-instantiated as file URLs. Filtering existing paths happens
+        // at click-time in the menu so we don't lose history just because
+        // a project is temporarily on an unmounted drive.
+        if let savedPaths = UserDefaults.standard.array(forKey: Self.recentProjectsKey) as? [String] {
+            self.recentProjectURLs = savedPaths
+                .prefix(Self.recentProjectsLimit)
+                .map { URL(fileURLWithPath: $0) }
         }
 
         // Flush any pending debounced persist when the app is about to terminate.
@@ -1312,6 +1331,77 @@ final class SHAppViewModel {
     }
 
     private static let promptHistoryKey = "SHPromptHistory"
+    private static let recentProjectsKey = "SHRecentProjects"
+
+    // MARK: – Recent projects
+
+    /// Pushes a project URL onto `recentProjectURLs` (most recent first,
+    /// deduplicated by path, capped). Called from `saveProjectAs` and
+    /// `openProject` after success. Scratch view-models skip the write
+    /// to UserDefaults — consistent with prompt history and recent
+    /// folders gating.
+    private func rememberProjectURL(_ url: URL) {
+        let path = url.path
+        recentProjectURLs.removeAll { $0.path == path }
+        recentProjectURLs.insert(url, at: 0)
+        if recentProjectURLs.count > Self.recentProjectsLimit {
+            recentProjectURLs.removeLast(recentProjectURLs.count - Self.recentProjectsLimit)
+        }
+        guard persistenceMode == .persistent else { return }
+        let paths = recentProjectURLs.map { $0.path }
+        Task.detached(priority: .utility) {
+            UserDefaults.standard.set(paths, forKey: Self.recentProjectsKey)
+        }
+    }
+
+    /// Drops a project URL from the recent list. Called when openProject
+    /// hits a hard failure (file missing / unreadable) — keeping a dead
+    /// path in the menu just produces repeat error alerts.
+    private func forgetProjectURL(_ url: URL) {
+        recentProjectURLs.removeAll { $0.path == url.path }
+        guard persistenceMode == .persistent else { return }
+        let paths = recentProjectURLs.map { $0.path }
+        Task.detached(priority: .utility) {
+            UserDefaults.standard.set(paths, forKey: Self.recentProjectsKey)
+        }
+    }
+
+    /// User-invoked clear from `File → Otevřít nedávné → Vyčistit`.
+    func clearRecentProjects() {
+        recentProjectURLs.removeAll()
+        guard persistenceMode == .persistent else { return }
+        let key = Self.recentProjectsKey
+        Task.detached(priority: .utility) {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    // MARK: – Server health (manual recheck)
+
+    /// Manual one-off ping on the verified server. Fires outside the
+    /// 30 s ambient health watcher loop so the user can verify
+    /// connectivity *now* (e.g. just restarted LM Studio) without
+    /// waiting up to 30 s for the next scheduled poll. Updates
+    /// `isVerifiedServerReachable` and `statusText`.
+    func recheckServerNow() async {
+        guard let server = selectedServer else {
+            statusText = "Není vybraný server"
+            return
+        }
+        guard isSelectedServerVerified else {
+            statusText = "Server nejdřív ověř (Ověřit)"
+            return
+        }
+        statusText = "Kontroluji server…"
+        do {
+            let models = try await lmClient.fetchModels(server)
+            isVerifiedServerReachable = true
+            statusText = "Server dostupný · modely: \(models.count)"
+        } catch {
+            isVerifiedServerReachable = false
+            statusText = "Server odpojen: \(error.localizedDescription)"
+        }
+    }
 
     // MARK: – Save / Load Project (pragmatic DocumentGroup substitute)
 
@@ -1344,6 +1434,7 @@ final class SHAppViewModel {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(snapshot)
             try data.write(to: url, options: .atomic)
+            rememberProjectURL(url)
             statusText = "Projekt uložen: \(url.lastPathComponent)"
             return url
         } catch {
@@ -1374,6 +1465,15 @@ final class SHAppViewModel {
         panel.title = "Otevřít projekt…"
         panel.message = "Vyber .spiceharvester.json soubor exportovaný přes Uložit projekt jako…"
         guard panel.runModal() == .OK, let url = panel.url else { return .cancelled }
+        return openProject(at: url)
+    }
+
+    /// Direct-path variant of `openProject` used by `File → Otevřít
+    /// nedávné…` menu items. Skips the open panel and decodes from the
+    /// known URL. If decoding fails (file missing, format invalid), the
+    /// URL is removed from `recentProjectURLs` so the menu doesn't keep
+    /// listing a dead entry.
+    func openProject(at url: URL) -> SHOpenProjectOutcome {
         do {
             let data = try Data(contentsOf: url)
             // Wrap the decode in a project-shaped sniff so a friendly
@@ -1424,6 +1524,7 @@ final class SHAppViewModel {
             refreshInputFolderStats()
             scheduleConflictUpdate(after: 0)
             persistAll()
+            rememberProjectURL(url)
             statusText = stalePaths.isEmpty
                 ? "Projekt načten: \(url.lastPathComponent)"
                 : "Projekt načten · \(stalePaths.count) složek vyžaduje re-pick"
@@ -1431,6 +1532,9 @@ final class SHAppViewModel {
                 ? .success(url: url)
                 : .successNeedsRepick(url: url, stalePaths: stalePaths)
         } catch {
+            // Open Recent click hit a dead path — drop it so the user
+            // doesn't see the same error every time they open the menu.
+            forgetProjectURL(url)
             statusText = "Otevření projektu selhalo: \(error.localizedDescription)"
             return .failed(error: error)
         }

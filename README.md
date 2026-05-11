@@ -145,6 +145,16 @@ Pipeline se nejdřív pokusí dekódovat odpověď proti vestavěnému kanonick�
 
 **Tab navigace** přes hlavní tlačítka funguje i bez systémového zapnutí *Keyboard Navigation* — aplikace má vlastní `NSEvent` monitor, který Tab/Shift+Tab cykluje pouze přes aktivní (neszedisabledované) tlačítka. **Esc** uvolní textové pole a skočí na Spustit.
 
+### Menu bar layout
+
+| Menu | Položky |
+|---|---|
+| **File** | Nové okno (scratch) `Cmd+Shift+N` · Otevřít projekt… `Cmd+O` · Otevřít nedávné › … · Uložit projekt jako… `Cmd+Shift+S` · Otevřít výstup ve Finderu `Cmd+Shift+O` |
+| **Pipeline** *(custom top-level)* | Spustit `Cmd+R` · Přerušit `Cmd+.` · Předzpracování `Cmd+Shift+P` · Extrakce `Cmd+Shift+E` · Režim FAST / SEARCH / CONSOLIDATE `Cmd+1/2/3` · Znovu ověřit zdraví serveru |
+| **Help** | Nápověda Spice Harvester `Cmd+?` |
+
+Pipeline akce mají vlastní top-level menu (vzor: Xcode Product menu, Logic Pro Track menu) — File menu drží jen project/document operace.
+
 ## Výkon a cache
 
 ### Inference cache

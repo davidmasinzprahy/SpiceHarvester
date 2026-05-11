@@ -46,6 +46,9 @@ Jediný zdroj pravdy pro pojmenování v GUI, nápovědě (HelpSheet) a uživate
 | Live throughput | **N dok/min · ⌀ T s/dok** | — | V Progress kartě vedle ETA při běhu. |
 | Drag handle | drobná pila uprostřed VSplitView dělítka | `dragHandleGrip` | Vizuální affordance "tažitelný separator". |
 | Tab cyklus | **Tab** / **Shift+Tab** mezi aktivními tlačítky | NSEvent monitor + `@FocusState` | Vlastní implementace, nezávislá na sys Keyboard Navigation. |
+| Pipeline menu | **Pipeline** (top-level v menu baru) | `CommandMenu("Pipeline")` | Sjednocené pro Spustit/Přerušit/Předzpracování/Extrakce/Režim/server recheck. Vzor: Xcode Product, Logic Track. |
+| Recent projects | **Otevřít nedávné** (File submenu) | `recentProjectURLs` | Max 8 položek, persistované v UserDefaults; dead path se auto-odebere. |
+| Manual server ping | **Znovu ověřit zdraví serveru** | `recheckServerNow()` | Mimo 30 s health watcher loop; pro okamžitou kontrolu po restartu LM Studia. |
 
 ## Kontrola konzistence
 

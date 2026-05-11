@@ -67,6 +67,28 @@ Pokročilá nastavení (souběžnost, throttle, kontext modelu, timeout, OCR bac
 
 > Tab/Shift+Tab cyklus funguje **i bez** systémového *Keyboard Navigation* (System Settings → Keyboard) — aplikace má vlastní `NSEvent` monitor a respektuje stejné `canX` predikáty jako disabled state tlačítek.
 
+## Menu bar layout
+
+Aplikace přidává custom top-level menu **Pipeline** mezi standardní macOS menu — pipeline akce (Spustit, Přerušit, Předzpracování, Extrakce, Režim, Znovu ověřit server) jsou tam sjednocené. **File** menu drží jen project/document operace.
+
+### File
+- **Nové okno (scratch)** — Cmd+Shift+N
+- **Otevřít projekt…** — Cmd+O
+- **Otevřít nedávné** › last 8 projektů + Vyčistit seznam
+- **Uložit projekt jako…** — Cmd+Shift+S
+- **Otevřít výstup ve Finderu** — Cmd+Shift+O
+
+### Pipeline *(custom)*
+- **Spustit** / **Přerušit** — Cmd+R / Cmd+.
+- **Předzpracování** — Cmd+Shift+P
+- **Extrakce** — Cmd+Shift+E
+- **Režim FAST / SEARCH / CONSOLIDATE** — Cmd+1 / Cmd+2 / Cmd+3
+- **Znovu ověřit zdraví serveru** — manuální ping mimo 30 s health watcher (užitečné hned po restartu LM Studia: kliknutí dá okamžitou červenou/zelenou indikaci místo čekání až 30 s na další scheduled ping)
+
+### Otevřít nedávné
+
+Po každém **Uložit projekt jako…** nebo **Otevřít projekt…** se cesta zaznamenává do persistentního seznamu (max 8). V submenu se zobrazují jako `název · cesta` (s tildeify, např. `medical · ~/Documents/projects`). Kliknutí přímo načte projekt — bez panel dialogu. Když cesta selže (soubor smazán), automaticky se ze seznamu odebere.
+
 ## Shortcuts.app + Siri
 
 V macOS Shortcuts.app jsou registrované akce:

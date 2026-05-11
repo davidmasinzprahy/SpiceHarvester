@@ -45,6 +45,23 @@ struct SpiceHarvesterApp: App {
     /// target so no @available guard needed.
     @Environment(\.openWindow) private var openWindow
 
+    /// Compact label for a recent-project URL shown in the
+    /// `File → Otevřít nedávné…` submenu. Strips the redundant
+    /// `.spiceharvester.json` suffix and tildeifies the parent path so
+    /// `~/Documents/medical/foo.spiceharvester.json` reads as
+    /// `foo · ~/Documents/medical`.
+    private func recentProjectMenuTitle(_ url: URL) -> String {
+        var name = url.lastPathComponent
+        if name.hasSuffix(".spiceharvester.json") {
+            name = String(name.dropLast(".spiceharvester.json".count))
+        } else if name.hasSuffix(".json") {
+            name = String(name.dropLast(".json".count))
+        }
+        let parent = (url.deletingLastPathComponent().path as NSString)
+            .abbreviatingWithTildeInPath
+        return "\(name) · \(parent)"
+    }
+
     var body: some Scene {
         WindowGroup(id: "main") {
             ContentView(vm: vm, showHelp: $showHelp)
@@ -54,9 +71,74 @@ struct SpiceHarvesterApp: App {
         // AppDelegate below then adapts the actual launch frame to the current screen.
         .defaultSize(width: 1180, height: 980)
         .commands {
-            // Replace the boilerplate "New Window" with the run controls users
-            // actually need; Cmd+R / Cmd+. mirror Xcode's run/stop muscle memory.
+            // ┌──────────────────────────────────────────────────────────┐
+            // │ File menu — purely document / project operations.        │
+            // │ Run/Stop and mode switching moved to dedicated Pipeline  │
+            // │ menu below (matches Xcode/Logic/Final Cut convention for │
+            // │ process-driven apps).                                    │
+            // └──────────────────────────────────────────────────────────┘
+
+            // File → Nové okno + Otevřít projekt (Cmd+N replacement;
+            // .newItem default is "New Window" which Spice Harvester
+            // doesn't need — we have scratch via Cmd+Shift+N).
             CommandGroup(replacing: .newItem) {
+                Button("Nové okno (scratch)") {
+                    openWindow(id: "scratch", value: UUID())
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Otevřít projekt…") {
+                    let outcome = vm.openProject()
+                    SHAppDelegate.handleOpenProjectOutcome(outcome)
+                }
+                .keyboardShortcut("o", modifiers: .command)
+                .disabled(vm.isRunning)
+
+                // Open Recent submenu — fed by `vm.recentProjectURLs`,
+                // written on every saveProjectAs / openProject success.
+                // Click item → openProject(at:) bypasses NSOpenPanel.
+                Menu("Otevřít nedávné") {
+                    ForEach(Array(vm.recentProjectURLs.enumerated()), id: \.element) { _, url in
+                        Button(recentProjectMenuTitle(url)) {
+                            let outcome = vm.openProject(at: url)
+                            SHAppDelegate.handleOpenProjectOutcome(outcome)
+                        }
+                        .disabled(vm.isRunning)
+                    }
+                    if !vm.recentProjectURLs.isEmpty {
+                        Divider()
+                        Button("Vyčistit seznam") {
+                            vm.clearRecentProjects()
+                        }
+                    }
+                }
+                .disabled(vm.recentProjectURLs.isEmpty)
+            }
+
+            // File → Uložit projekt jako… (Cmd+Shift+S, placed after .saveItem)
+            CommandGroup(after: .saveItem) {
+                Divider()
+                Button("Uložit projekt jako…") {
+                    _ = vm.saveProjectAs()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(vm.isRunning || !vm.canSaveProject)
+
+                Button("Otevřít výstup ve Finderu") {
+                    vm.openOutput()
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+                .disabled(!vm.canOpenOutput)
+            }
+
+            // ┌──────────────────────────────────────────────────────────┐
+            // │ Pipeline menu — top-level menu for all run / stop /      │
+            // │ mode / server actions. CommandMenu adds a custom menu    │
+            // │ between Edit/View and Window in macOS native menu bar.   │
+            // └──────────────────────────────────────────────────────────┘
+            CommandMenu("Pipeline") {
                 Button("Spustit") {
                     Task { await vm.runAll() }
                 }
@@ -85,35 +167,28 @@ struct SpiceHarvesterApp: App {
 
                 Divider()
 
-                Button("Otevřít výstup") {
-                    vm.openOutput()
-                }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
-                .disabled(!vm.canOpenOutput)
-            }
+                // Režim extrakce zkratky. Moved from .toolbar placement
+                // — mode is pipeline-behavior config, not view state.
+                Button("Režim FAST") { vm.config.extractionMode = .fast }
+                    .keyboardShortcut("1", modifiers: .command)
+                    .disabled(vm.isRunning)
+                Button("Režim SEARCH") { vm.config.extractionMode = .search }
+                    .keyboardShortcut("2", modifiers: .command)
+                    .disabled(vm.isRunning)
+                Button("Režim CONSOLIDATE") { vm.config.extractionMode = .consolidate }
+                    .keyboardShortcut("3", modifiers: .command)
+                    .disabled(vm.isRunning)
 
-            // Režim extrakce zkratky. Cmd+1/2/3 přepínají FAST / SEARCH /
-            // CONSOLIDATE bez nutnosti scrollovat na segmented picker. Pro
-            // power-usery, kteří iterují prompt s různými režimy, je
-            // klikání myší výrazný friction point.
-            CommandGroup(after: .toolbar) {
-                Button("Režim FAST") {
-                    vm.config.extractionMode = .fast
-                }
-                .keyboardShortcut("1", modifiers: .command)
-                .disabled(vm.isRunning)
+                Divider()
 
-                Button("Režim SEARCH") {
-                    vm.config.extractionMode = .search
+                // Manual server ping outside the 30 s ambient health
+                // watcher loop. Useful right after restarting LM Studio:
+                // user clicks Re-check, gets immediate green/red feedback
+                // instead of waiting up to 30 s for the next scheduled ping.
+                Button("Znovu ověřit zdraví serveru") {
+                    Task { await vm.recheckServerNow() }
                 }
-                .keyboardShortcut("2", modifiers: .command)
-                .disabled(vm.isRunning)
-
-                Button("Režim CONSOLIDATE") {
-                    vm.config.extractionMode = .consolidate
-                }
-                .keyboardShortcut("3", modifiers: .command)
-                .disabled(vm.isRunning)
+                .disabled(!vm.isSelectedServerVerified || vm.isRunning)
             }
 
             CommandGroup(replacing: .help) {
@@ -129,50 +204,6 @@ struct SpiceHarvesterApp: App {
                     }
                 }
                 .keyboardShortcut("?", modifiers: .command)
-            }
-
-            // File → Save / Open project: pragmatic stand-in for full
-            // DocumentGroup migration. Saves a JSON snapshot of folders +
-            // server selection + prompt + mode; loading restores those
-            // fields without disturbing global server registry or perf
-            // tuning. See `SHAppViewModel.SHProjectSnapshot`.
-            CommandGroup(after: .saveItem) {
-                Divider()
-                Button("Uložit projekt jako…") {
-                    _ = vm.saveProjectAs()
-                }
-                .keyboardShortcut("s", modifiers: [.command, .shift])
-                // Saving an empty project (no folders, no prompt) yields
-                // a JSON file with just empty strings — useless to the
-                // user. Require at least input + output set, or a prompt,
-                // before offering the save.
-                .disabled(vm.isRunning || !vm.canSaveProject)
-
-                Button("Otevřít projekt…") {
-                    let outcome = vm.openProject()
-                    SHAppDelegate.handleOpenProjectOutcome(outcome)
-                }
-                .keyboardShortcut("o", modifiers: .command)
-                .disabled(vm.isRunning)
-
-                Divider()
-
-                // Multi-window — opens a *scratch* secondary window with
-                // its own view-model. Differences vs the primary window:
-                //   - Doesn't persist config to UserDefaults (would clash
-                //     with primary's slot — last write wins is confusing).
-                //   - Server registry, recents, and prompt history are
-                //     loaded from UserDefaults at init so the user has
-                //     access to their saved servers, but changes don't
-                //     write back.
-                //   - Closing the scratch window discards its config;
-                //     persistence is via `Uložit projekt jako…` only.
-                // Pragmatic stand-in for full DocumentGroup migration —
-                // see `docs/P2_BACKLOG_DEFERRED.md`.
-                Button("Nové okno") {
-                    openWindow(id: "scratch", value: UUID())
-                }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
             }
         }
 
