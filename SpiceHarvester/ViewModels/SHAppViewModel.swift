@@ -243,6 +243,13 @@ final class SHAppViewModel {
     private var lastRunDocumentCount: Int = 0
     private var lastRunCSVPath: String = ""
 
+    /// Snapshot of config fields that `applyIntentParameters` overrode
+    /// for the current Shortcuts.app run. Restored in
+    /// `broadcastRunDidComplete` so the user's GUI state isn't
+    /// permanently mutated by a per-run override. nil when no
+    /// override is active (most runs).
+    private var intentOverrideRestore: (mode: SHExtractionMode, prompt: String, lastPromptName: String)?
+
     /// Is the currently selected server's last verification still valid?
     var isSelectedServerVerified: Bool {
         guard let id = verifiedServerID, let current = selectedServer else { return false }
@@ -836,7 +843,17 @@ final class SHAppViewModel {
                 queue: .main
             ) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, !self.isRunning, self.canRunAll else { return }
+                    guard let self else { return }
+                    // Guard reject (no input/server/model OR already
+                    // running) MUST still broadcast `runDidComplete`,
+                    // otherwise an awaiting Shortcuts.app intent
+                    // continuation hangs forever. Surface the reject
+                    // as `notStarted` outcome so the dialog text in
+                    // the Shortcut reads `nespuštěno · <status>`.
+                    guard !self.isRunning, self.canRunAll else {
+                        self.broadcastRunDidComplete(outcome: .notStarted)
+                        return
+                    }
                     await self.runAll()
                 }
             }
@@ -1758,18 +1775,23 @@ final class SHAppViewModel {
             // Open Recent click hit a dead path — drop it so the user
             // doesn't see the same error every time they open the menu.
             forgetProjectURL(url)
-            // Distinguish "file gone / corrupt" from "sandbox refused
-            // the read because we have no valid bookmark for this
-            // path". The latter happens primarily across app restarts
-            // when the original NSOpenPanel grant has expired and the
-            // stored bookmark either didn't exist or failed to resolve
-            // — the remediation is "re-pick via Cmd+O", not the
-            // generic Cocoa error text.
+            // Distinguish "sandbox refused the read because we have no
+            // valid bookmark" from genuine I/O errors. The former
+            // happens primarily across app restarts when the original
+            // NSOpenPanel grant has expired and the stored bookmark
+            // either didn't exist or failed to resolve — the
+            // remediation is "re-pick via Cmd+O", not the generic
+            // Cocoa error text.
+            //
+            // ONLY `NSFileReadNoPermissionError` qualifies. `NSFileNoSuchFileError`
+            // means the file is genuinely missing (user deleted the
+            // project file outside the app) — the remediation is
+            // different, and a "vyžaduje re-grant" message would
+            // mislead the user into clicking Cmd+O looking for a file
+            // that no longer exists.
             let nsError = error as NSError
             let isPermissionError = nsError.domain == NSCocoaErrorDomain
-                && (nsError.code == NSFileReadNoPermissionError
-                    || nsError.code == NSFileNoSuchFileError
-                    || nsError.code == NSFileReadUnknownError)
+                && nsError.code == NSFileReadNoPermissionError
             if isPermissionError && !scoped.scopeStarted {
                 let mapped = SHProjectError.permissionDenied(url: url)
                 statusText = "Cesta vyžaduje re-grant — otevři projekt znovu (Cmd+O)"
@@ -1901,6 +1923,13 @@ final class SHAppViewModel {
     /// without touching the persisted app state. Unknown keys are
     /// ignored; absent keys leave the existing value in place.
     ///
+    /// **Ephemeral semantics:** before mutating, snapshot the original
+    /// values into `intentOverrideRestore`. `broadcastRunDidComplete`
+    /// rolls back to the snapshot at the end of the run so a Shortcut
+    /// with `promptName: "lekarska"` doesn't permanently change the
+    /// app's loaded prompt — the user's GUI state is exactly what it
+    /// was before the Shortcut fired.
+    ///
     /// The prompt lookup is name-based against the loaded prompt
     /// library — Shortcuts users typically type a stable filename
     /// (e.g. `lekarska-zprava.md`) rather than pasting a multi-KB
@@ -1909,6 +1938,14 @@ final class SHAppViewModel {
     /// prompt, and the failure surfaces in the result dialog via
     /// `statusText` when the user notices empty output).
     fileprivate func applyIntentParameters(_ userInfo: [AnyHashable: Any]) {
+        // Snapshot BEFORE any mutation so restore is exact. If a
+        // previous override is still pending restore (e.g. back-to-back
+        // intent invocations without a runAll between them), keep the
+        // older snapshot — that's the genuine pre-Shortcut state.
+        if intentOverrideRestore == nil {
+            intentOverrideRestore = (config.extractionMode, config.currentPrompt, config.lastLoadedPromptName)
+        }
+
         if let raw = userInfo["mode"] as? String,
            let mode = SHExtractionMode(rawValue: raw) {
             config.extractionMode = mode
@@ -1926,8 +1963,54 @@ final class SHAppViewModel {
                 let lower = url.lastPathComponent.lowercased()
                 return lower == normalized || lower == withSuffix
             }) {
-                loadPromptFile(match)
+                // Read content directly instead of `loadPromptFile`
+                // (which calls `persistAll`). The view's onChange
+                // handler on `config.currentPrompt` still fires
+                // `persistAllDebounced` 300 ms later, but our restore
+                // path below resets the value before then most of the
+                // time, and final `persistAll` overwrites any racing
+                // debounced write with the restored snapshot.
+                // `try?` on a function returning `String?` flattens to
+                // `String?`, so a single `if let` captures both the
+                // throw and the nil-resolve cases.
+                if let loaded = try? withScopedAccess(to: config.promptFolder, { _ in
+                    try promptService.loadContent(of: match)
+                }) {
+                    config.currentPrompt = loaded
+                    config.lastLoadedPromptName = match.lastPathComponent
+                }
             }
+        }
+    }
+
+    /// Reverts config fields mutated by `applyIntentParameters` back
+    /// to the pre-Shortcut snapshot. Called from `broadcastRunDidComplete`
+    /// so the rollback runs regardless of how the run settled (success,
+    /// cancel, failure, guard reject). No-op when no override is active.
+    private func restoreIntentOverridesIfNeeded() {
+        guard let restore = intentOverrideRestore else { return }
+        intentOverrideRestore = nil
+        // Only write back fields that actually changed — avoids a
+        // pointless `persistAll` when the override was a no-op (e.g.
+        // `mode` value matched current, `promptName` didn't resolve).
+        var didChange = false
+        if config.extractionMode != restore.mode {
+            config.extractionMode = restore.mode
+            didChange = true
+        }
+        if config.currentPrompt != restore.prompt {
+            config.currentPrompt = restore.prompt
+            didChange = true
+        }
+        if config.lastLoadedPromptName != restore.lastPromptName {
+            config.lastLoadedPromptName = restore.lastPromptName
+            didChange = true
+        }
+        if didChange {
+            // Synchronous write overrides any pending debounced
+            // persist scheduled by view onChange handlers during the
+            // override window.
+            persistAll()
         }
     }
 
@@ -1998,12 +2081,31 @@ final class SHAppViewModel {
             postCompletionNotification(for: outcome)
         }
 
-        // Broadcast the run summary so a `RunSpiceHarvesterIntent`
-        // (Shortcuts.app) currently awaiting completion can resume
-        // its continuation. The payload mirrors what the intent's
-        // ReturnsValue / ProvidesDialog needs — kept lean (primitives)
-        // so the Notification can cross actor boundaries without
-        // sendable warnings.
+        broadcastRunDidComplete(outcome: outcome)
+
+        isRunning = false
+        runEntered = false
+        currentTask = nil
+    }
+
+    /// Posts `SHIntentNotifications.runDidComplete` with the latest
+    /// summary so an awaiting `RunSpiceHarvesterIntent` (Shortcuts.app)
+    /// can resume its continuation. **Gated to `.persistent` vm** —
+    /// scratch windows don't participate in the intent contract and
+    /// their concurrent runs would otherwise race with the primary's
+    /// post (intent observer takes the first matching notification
+    /// regardless of source vm). Called from two sites:
+    ///   - end of `executeRun` (normal completion path)
+    ///   - intent `runAll` observer when `canRunAll` guard rejects
+    ///     (otherwise the intent's continuation would hang forever
+    ///     because `executeRun` never runs)
+    fileprivate func broadcastRunDidComplete(outcome: SHRunOutcome) {
+        guard persistenceMode == .persistent else { return }
+        // Restore intent-driven config overrides BEFORE the post so
+        // by the time the awaiting Shortcut continuation resumes, the
+        // app's persisted state is back to pre-Shortcut values. The
+        // restore is a no-op when no override was applied.
+        restoreIntentOverridesIfNeeded()
         let outcomeRaw: String
         switch outcome {
         case .success: outcomeRaw = "success"
@@ -2013,7 +2115,7 @@ final class SHAppViewModel {
         }
         NotificationCenter.default.post(
             name: SHIntentNotifications.runDidComplete,
-            object: nil,
+            object: self,
             userInfo: [
                 "outcome": outcomeRaw,
                 "documentCount": lastRunDocumentCount,
@@ -2021,10 +2123,6 @@ final class SHAppViewModel {
                 "statusText": statusText
             ]
         )
-
-        isRunning = false
-        runEntered = false
-        currentTask = nil
     }
 
     // MARK: – Notification Center

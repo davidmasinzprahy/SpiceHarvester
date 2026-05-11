@@ -2,6 +2,13 @@ import Foundation
 import Testing
 @testable import SpiceHarvester
 
+/// `.serialized` because several tests below mutate
+/// `UserDefaults.standard` under shared keys
+/// (`SHRecentProjects`, `SHProjectBookmarks`). Swift Testing
+/// parallelizes by default; without serialization the
+/// `defer { restore }` save/restore dance races between tests and
+/// produces sporadic failures on busy CI.
+@Suite(.serialized)
 struct SpiceHarvesterTests {
     @Test func extractionResultMergeFillsOnlyMissingFields() {
         var base = SHExtractionResult.empty(sourceFile: "a.pdf")
