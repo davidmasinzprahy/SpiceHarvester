@@ -2295,6 +2295,25 @@ final class SHAppViewModel {
         return (trimmed as NSString).standardizingPath
     }
 
+    #if DEBUG
+    /// Clears process-wide static state (`activeOutputClaims`,
+    /// `liveRegistry`). Test-only entry point — production code
+    /// shouldn't ever need to wipe these because deallocation +
+    /// `executeRun` release paths keep them tidy. But tests create
+    /// many vms back-to-back with hardcoded folder paths; without
+    /// a reset between tests a previous test's lingering claim or
+    /// stale registry entry could leak into the next.
+    ///
+    /// Gated on `#if DEBUG` so the symbol simply isn't there in
+    /// release builds — even an accidental call from production
+    /// code would be a compile error.
+    @MainActor
+    static func _resetStaticStateForTesting() {
+        activeOutputClaims.removeAll()
+        liveRegistry.removeAllObjects()
+    }
+    #endif
+
     // MARK: – Notification Center
 
     // Notification authorization & category registration moved to

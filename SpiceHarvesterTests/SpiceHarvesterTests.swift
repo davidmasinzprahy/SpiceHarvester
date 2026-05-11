@@ -8,8 +8,21 @@ import Testing
 /// parallelizes by default; without serialization the
 /// `defer { restore }` save/restore dance races between tests and
 /// produces sporadic failures on busy CI.
+///
+/// `init()` resets process-wide static state on
+/// `SHAppViewModel` (live-vm registry + active output-folder
+/// claims) so a previous test's vm doesn't bleed into the
+/// `resolveIntentTarget` lookup or the collision check the next
+/// test exercises. Swift Testing constructs a new suite instance
+/// per `@Test`, so this runs once before each test.
 @Suite(.serialized)
 struct SpiceHarvesterTests {
+    init() async {
+        await MainActor.run {
+            SHAppViewModel._resetStaticStateForTesting()
+        }
+    }
+
     @Test func extractionResultMergeFillsOnlyMissingFields() {
         var base = SHExtractionResult.empty(sourceFile: "a.pdf")
         base.patient_name = "Jan Novak"
