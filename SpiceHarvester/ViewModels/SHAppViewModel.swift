@@ -223,6 +223,8 @@ final class SHAppViewModel {
     /// same reason as `projectBookmarks`: that struct is wiped at launch, but
     /// `recentFolders` paths survive — and a sandboxed app can't read a folder
     /// from a bare path string once the NSOpenPanel grant's session ends.
+    /// `resolveScopedURL` falls back to this store, so it is never seeded into
+    /// `config.folderBookmarks` (which would re-pollute the wiped config slot).
     /// Without this, picking a recent input folder makes the PDF scan return
     /// 0 (folder unreadable) even though the path is correct.
     private var recentFolderBookmarks: [String: Data] = [:]
@@ -883,17 +885,15 @@ final class SHAppViewModel {
 
         // Recent-folder *paths* were just restored above, but the security-scoped
         // bookmarks that make them readable in the sandbox were cleared with the
-        // rest of `config`. Restore them from their own store and seed
-        // `config.folderBookmarks` so selecting a recent folder has scoped access
-        // (otherwise `refreshInputFolderStats` scans a bare path and silently
-        // counts 0 PDFs). Done *after* the cleared-config save above so the
-        // wiped slot stays clean; this store is the durable source of truth.
+        // rest of `config`. Restore the durable bookmark store so `resolveScopedURL`
+        // can fall back to it — without this, selecting a recent folder scans a
+        // bare path and silently counts 0 PDFs. We deliberately do NOT seed these
+        // into `config.folderBookmarks`: that struct is persisted on every save and
+        // seeding it would re-pollute the slot the launch-time wipe just cleaned.
+        // Prune to paths still present in some recents list so the store stays bounded.
         if let savedBookmarks = UserDefaults.standard.dictionary(forKey: Self.recentFolderBookmarksKey) as? [String: Data] {
             let livePaths = Set(recentFolders.values.flatMap { $0 })
             recentFolderBookmarks = savedBookmarks.filter { livePaths.contains($0.key) }
-            for (path, data) in recentFolderBookmarks {
-                config.folderBookmarks[path] = data
-            }
             if recentFolderBookmarks.count != savedBookmarks.count {
                 persistRecentFolderBookmarks()
             }
@@ -1896,7 +1896,10 @@ final class SHAppViewModel {
         for path in candidates {
             let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            if config.folderBookmarks[trimmed] == nil {
+            // A path is recoverable if either store holds a bookmark — mirror
+            // the same fallback `resolveScopedURL` uses, so a folder covered by
+            // the durable recents store isn't falsely flagged "re-pick required".
+            if config.folderBookmarks[trimmed] == nil && recentFolderBookmarks[trimmed] == nil {
                 stale.append(trimmed)
             }
         }
@@ -2864,17 +2867,20 @@ final class SHAppViewModel {
         }
     }
 
-    /// Resolves a stored path to a URL. If a security-scoped bookmark exists it is used
-    /// (and refreshed when stale); otherwise a plain file URL is returned, which only
-    /// works inside the session the folder was selected in.
+    /// Resolves a stored path to a URL. Prefers the this-session
+    /// `config.folderBookmarks`, then falls back to the durable
+    /// `recentFolderBookmarks` (which survives the launch-time config wipe);
+    /// otherwise returns a plain file URL, which only works inside the session
+    /// the folder was selected in. Both bookmarks are keyed by the lookup path
+    /// (`trimmed`) so the recents list and the durable store stay in sync.
     ///
-    /// Any mutation of `config.folderBookmarks` (drop of unusable bookmark, refresh of
-    /// stale bookmark) is persisted immediately so the next launch sees the fix.
+    /// Drop of an unusable bookmark and refresh of a stale one are persisted
+    /// immediately so the next launch sees the fix.
     private func resolveScopedURL(for path: String) -> URL? {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        guard let data = config.folderBookmarks[trimmed] else {
+        guard let data = config.folderBookmarks[trimmed] ?? recentFolderBookmarks[trimmed] else {
             return URL(fileURLWithPath: trimmed)
         }
 
@@ -2885,7 +2891,8 @@ final class SHAppViewModel {
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else {
-            // Bookmark is unusable – drop it and fall back to the raw path.
+            // Bookmark is unusable – drop it from both stores and fall back
+            // to the raw path.
             config.folderBookmarks.removeValue(forKey: trimmed)
             if recentFolderBookmarks.removeValue(forKey: trimmed) != nil {
                 persistRecentFolderBookmarks()
@@ -2900,15 +2907,13 @@ final class SHAppViewModel {
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             ) {
-                config.folderBookmarks[url.path] = fresh
-                if url.path != trimmed {
-                    config.folderBookmarks.removeValue(forKey: trimmed)
-                }
-                // Keep the durable recent-folder grant fresh too, so the
-                // refresh isn't lost on the next launch-time config wipe.
-                if recentFolderBookmarks[trimmed] != nil || recentFolderBookmarks[url.path] != nil {
-                    recentFolderBookmarks.removeValue(forKey: trimmed)
-                    recentFolderBookmarks[url.path] = fresh
+                // Re-key under the same lookup path. The bookmark data itself
+                // tracks the real (possibly moved) location, so keeping the
+                // `trimmed` key keeps both stores aligned with the recents list
+                // — keying by `url.path` would orphan the entry on next launch.
+                config.folderBookmarks[trimmed] = fresh
+                if recentFolderBookmarks[trimmed] != nil {
+                    recentFolderBookmarks[trimmed] = fresh
                     persistRecentFolderBookmarks()
                 }
                 persistAll()
