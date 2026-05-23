@@ -1266,11 +1266,15 @@ struct ContentView: View {
                         .focused($focus, equals: .promptEditor)
 
                     if vm.config.currentPrompt.isEmpty {
+                        // Match the TextEditor's real text origin so the caret
+                        // lands on the placeholder: outer .padding(6) plus the
+                        // NSTextView line-fragment padding (5pt horizontal).
                         Text("Zadej prompt…")
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.tertiary)
-                            .padding(12)
-                        .allowsHitTesting(false)
+                            .padding(.leading, 11)
+                            .padding(.top, 6)
+                            .allowsHitTesting(false)
                     }
                 }
                 .frame(maxHeight: .infinity)
