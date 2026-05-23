@@ -136,6 +136,8 @@ Persistované přes `SHConfigStore` (`UserDefaults`):
 
 Poznámka k runtime: **při startu se část hodnot záměrně resetuje** (složky, bookmarky, text promptu, model selections), aby session začínala čistě. Persistují hlavně servery, výkonové preference, kontext modelu a průměry z posledního runu.
 
+**Recent-folder bookmarky přežívají reset**: `config.folderBookmarks` se při startu maže, ale cesty v `recentFolders` se obnovují z UserDefaults. Aby výběr nedávné složky měl v sandboxu scoped přístup (jinak sken vrátí 0 PDF), drží se security-scoped bookmarky pro nedávné cesty v samostatném trvalém úložišti `recentFolderBookmarks: [String: Data]` (UserDefaults klíč `SHRecentFolderBookmarks`), analogicky k `projectBookmarks`. `resolveScopedURL` na toto úložiště padá jako **fallback** — záměrně se neseeduje zpět do `config.folderBookmarks`, aby se nezašpinil právě vyčištěný config slot. Při startu se store načte a profiltruje na cesty stále přítomné v `recentFolders` (bounded). Viz `resolveScopedURL`, `storeBookmark`, `staleSandboxPaths`.
+
 **Flush při ukončení**: `NSApplication.willTerminateNotification` → `persistAll()` (vynutí zapsání jakékoli pending debounced změny).
 
 ### Registry serverů
@@ -407,6 +409,7 @@ var isVerifiedServerReachable: Bool = true
 - `promptHistory: [String]` (max `promptHistoryLimit = 8`), `recordPromptInHistory()` push při Run start.
 - `recentFolders: [SHFolderKind: [String]]` (max `recentFoldersLimit = 5` per kind), `rememberRecentFolder(_:kind:)` push při folder pick.
 - Oba persisten do UserDefaults v `.persistent` mode (write přes `Task.detached(priority: .utility)` off-main).
+- `recentFolderBookmarks: [String: Data]` (UserDefaults `SHRecentFolderBookmarks`) — trvalé security-scoped bookmarky pro nedávné cesty, aby byly v sandboxu čitelné i po startu (kde se `config.folderBookmarks` maže). Zapisuje `storeBookmark` při picku, čte/profiltruje se v `init`, `resolveScopedURL` ho používá jako fallback. Viz sekce 6 (Konfigurace a persistence).
 
 #### Save/Open Project
 - `SHProjectSnapshot: Codable, Sendable` (top-level v Models layer) — folders + model picks + extractionMode + prompt + lastLoadedPromptName + schemaVersion.

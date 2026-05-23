@@ -120,7 +120,7 @@ Aplikace používá systémové sémantické barvy – ladí se automaticky s **
 | **Sekundární text** | `.secondary` | Popisky, subtitle, captions, em-dash placeholdery |
 | **Terciární text** | `.tertiary` | Placeholder v TextEditoru, `—` v idle folder rowech |
 | **Systémové BG** | `Color(nsColor: .windowBackgroundColor)` | Základ gradientu |
-| **Akcent** | `Color.accentColor` | Tón gradientu, výchozí macOS akcent |
+| **Akcent** | `Color.accentColor` | Tón gradientu, focus-ring, **kurzor textových polí**. Definován v `Assets.xcassets/AccentColor.colorset` jako systémová modrá (`#007AFF` / dark `#0A84FF`). Pozn.: nesmí být bílá — kurzor v polích přebírá akcent a na světlém pozadí by zmizel. |
 
 Conflict bannery a completion banner používají vzor **`tint.opacity(0.10)` fill + `tint.opacity(0.35)` stroke** – semi-transparentní, nerušivé.
 
@@ -280,7 +280,7 @@ Bílá matná karta s frosted-glass efektem. Použita pro **každou sekci** hlav
 - Dvojice tlačítek **„nothink"** / **„think"** (`.bordered` `.controlSize(.small)`) — aktivní mód má green/orange tint, nečinný blue.
 - Tlačítko **„Vymazat"** (`.borderless` blue) – zobrazí se jen pokud existuje text.
 - `TextEditor` monospace 12 pt, minHeight 160 / maxHeight 280, `.scrollContentBackground(.hidden)`, bg `.quinary` s `cornerRadius 6`, subtle border 0.5 pt.
-- Placeholder přes ZStack: „Zadej prompt…" `.tertiary` barvou, `.allowsHitTesting(false)` (text-field pozadí zůstává klikatelné).
+- Placeholder přes ZStack: „Zadej prompt…" `.tertiary` barvou, `.allowsHitTesting(false)` (text-field pozadí zůstává klikatelné). Padding zarovnán na skutečný počátek textu v `TextEditoru` (`leading 11` = outer `.padding(6)` + 5 pt line-fragment padding `NSTextView`, `top 6`), aby kurzor stál přesně na placeholderu.
 
 ### 5.6 Conflict banner
 Jemné upozornění na rozpor konfigurace a promptu.
