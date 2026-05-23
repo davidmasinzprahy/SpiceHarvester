@@ -218,6 +218,16 @@ final class SHAppViewModel {
     var recentFolders: [SHFolderKind: [String]] = [:]
     static let recentFoldersLimit: Int = 5
 
+    /// Security-scoped bookmarks for recent-folder paths, keyed by absolute
+    /// path. Kept **separately** from `SHAppConfig.folderBookmarks` for the
+    /// same reason as `projectBookmarks`: that struct is wiped at launch, but
+    /// `recentFolders` paths survive — and a sandboxed app can't read a folder
+    /// from a bare path string once the NSOpenPanel grant's session ends.
+    /// Without this, picking a recent input folder makes the PDF scan return
+    /// 0 (folder unreadable) even though the path is correct.
+    private var recentFolderBookmarks: [String: Data] = [:]
+    private static let recentFolderBookmarksKey = "SHRecentFolderBookmarks"
+
     /// Recently-touched `.spiceharvester.json` project files (both saved
     /// via Cmd+Shift+S and opened via Cmd+O). Drives the
     /// `File → Otevřít nedávné…` submenu so users don't have to
@@ -868,6 +878,24 @@ final class SHAppViewModel {
             let key = Self.recentFolderKey(for: kind)
             if let saved = UserDefaults.standard.array(forKey: key) as? [String] {
                 self.recentFolders[kind] = Array(saved.prefix(Self.recentFoldersLimit))
+            }
+        }
+
+        // Recent-folder *paths* were just restored above, but the security-scoped
+        // bookmarks that make them readable in the sandbox were cleared with the
+        // rest of `config`. Restore them from their own store and seed
+        // `config.folderBookmarks` so selecting a recent folder has scoped access
+        // (otherwise `refreshInputFolderStats` scans a bare path and silently
+        // counts 0 PDFs). Done *after* the cleared-config save above so the
+        // wiped slot stays clean; this store is the durable source of truth.
+        if let savedBookmarks = UserDefaults.standard.dictionary(forKey: Self.recentFolderBookmarksKey) as? [String: Data] {
+            let livePaths = Set(recentFolders.values.flatMap { $0 })
+            recentFolderBookmarks = savedBookmarks.filter { livePaths.contains($0.key) }
+            for (path, data) in recentFolderBookmarks {
+                config.folderBookmarks[path] = data
+            }
+            if recentFolderBookmarks.count != savedBookmarks.count {
+                persistRecentFolderBookmarks()
             }
         }
 
@@ -2818,6 +2846,22 @@ final class SHAppViewModel {
             relativeTo: nil
         ) else { return }
         config.folderBookmarks[url.path] = data
+        // Mirror into the durable recent-folder store so the grant survives
+        // the launch-time config wipe and recent folders stay readable.
+        recentFolderBookmarks[url.path] = data
+        persistRecentFolderBookmarks()
+    }
+
+    /// Persists `recentFolderBookmarks` off-main. Scratch windows skip the
+    /// write (same rationale as `rememberRecentFolder`) — they must not
+    /// clobber the primary window's stored grants.
+    private func persistRecentFolderBookmarks() {
+        guard persistenceMode == .persistent else { return }
+        let snapshot = recentFolderBookmarks
+        let key = Self.recentFolderBookmarksKey
+        Task.detached(priority: .utility) {
+            UserDefaults.standard.set(snapshot, forKey: key)
+        }
     }
 
     /// Resolves a stored path to a URL. If a security-scoped bookmark exists it is used
@@ -2843,6 +2887,9 @@ final class SHAppViewModel {
         ) else {
             // Bookmark is unusable – drop it and fall back to the raw path.
             config.folderBookmarks.removeValue(forKey: trimmed)
+            if recentFolderBookmarks.removeValue(forKey: trimmed) != nil {
+                persistRecentFolderBookmarks()
+            }
             persistAll()
             return URL(fileURLWithPath: trimmed)
         }
@@ -2856,6 +2903,13 @@ final class SHAppViewModel {
                 config.folderBookmarks[url.path] = fresh
                 if url.path != trimmed {
                     config.folderBookmarks.removeValue(forKey: trimmed)
+                }
+                // Keep the durable recent-folder grant fresh too, so the
+                // refresh isn't lost on the next launch-time config wipe.
+                if recentFolderBookmarks[trimmed] != nil || recentFolderBookmarks[url.path] != nil {
+                    recentFolderBookmarks.removeValue(forKey: trimmed)
+                    recentFolderBookmarks[url.path] = fresh
+                    persistRecentFolderBookmarks()
                 }
                 persistAll()
             }
