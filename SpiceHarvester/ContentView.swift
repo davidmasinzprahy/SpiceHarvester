@@ -154,6 +154,16 @@ struct ContentView: View {
         .onChange(of: vm.config.inputFolder) { _, _ in
             vm.refreshInputFolderStats()
         }
+        // Auto-list .md when the prompt folder is set (drop / recents / pick /
+        // project restore) so the user doesn't have to click "Načíst" first.
+        // Fires after the mutation, by which point the scoped bookmark is
+        // already stored, so the recursive scan has read access.
+        // `autoSelectLastLoaded: false` — only refresh the list; never auto-load
+        // a file, which would overwrite the editor's currentPrompt (data loss
+        // on project restore / when re-selecting a folder with unsaved edits).
+        .onChange(of: vm.config.promptFolder) { _, _ in
+            vm.reloadPromptFiles(autoSelectLastLoaded: false)
+        }
         .onChange(of: vm.isRunning) { _, isNow in
             // Auto-collapse fullscreen prompt when a run starts so the
             // user doesn't lose visibility of Progress + Log during the
@@ -810,24 +820,20 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     folderRow(icon: "tray.and.arrow.down.fill", label: "Vstup",
                               path: vm.config.inputFolder, action: vm.chooseInputFolder,
-                              focusField: .inputFolder, kind: .input,
-                              onDrop: { vm.config.inputFolder = $0; vm.persistAllDebounced() })
+                              focusField: .inputFolder, kind: .input)
                     if let chip = vm.inputFolderChipLabel {
                         inputFolderChip(chip)
                     }
                 }
                 folderRow(icon: "tray.and.arrow.up.fill", label: "Výstup",
                           path: vm.config.outputFolder, action: vm.chooseOutputFolder,
-                          focusField: .outputFolder, kind: .output,
-                          onDrop: { vm.config.outputFolder = $0; vm.persistAllDebounced() })
+                          focusField: .outputFolder, kind: .output)
                 folderRow(icon: "externaldrive.fill", label: "Cache",
                           path: vm.config.cacheFolder, action: vm.chooseCacheFolder,
-                          focusField: .cacheFolder, kind: .cache,
-                          onDrop: { vm.config.cacheFolder = $0; vm.persistAllDebounced() })
+                          focusField: .cacheFolder, kind: .cache)
                 folderRow(icon: "doc.text.fill", label: "Prompty (.md)",
                           path: vm.config.promptFolder, action: vm.choosePromptFolder,
-                          focusField: .promptFolder, kind: .prompt,
-                          onDrop: { vm.config.promptFolder = $0; vm.persistAllDebounced() })
+                          focusField: .promptFolder, kind: .prompt)
             }
             // If the user manually replaces the input folder (e.g. via drop),
             // drop the stale in-memory `cachedDocuments` from the previous run.
@@ -874,8 +880,7 @@ struct ContentView: View {
         path: String,
         action: @escaping () -> Void,
         focusField: SHFocusField,
-        kind: SHFolderKind,
-        onDrop: @escaping (String) -> Void
+        kind: SHFolderKind
     ) -> some View {
         let isSelected = !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
@@ -895,9 +900,13 @@ struct ContentView: View {
                 Text(isSelected ? path : "—")
                     .font(.system(.body, design: .monospaced))
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    // Right-aligned + head truncation: the tail of the path
+                    // (the actual folder name) is what matters, so keep it
+                    // pinned to the trailing edge and drop the prefix instead.
+                    .truncationMode(.head)
+                    .multilineTextAlignment(.trailing)
                     .foregroundStyle(isSelected ? .primary : .tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .help(isSelected ? path : "")
             }
             .padding(.horizontal, 8)
@@ -912,7 +921,10 @@ struct ContentView: View {
                 var isDir: ObjCBool = false
                 let exists = FileManager.default.fileExists(atPath: first.path, isDirectory: &isDir)
                 guard exists, isDir.boolValue else { return false }
-                onDrop(first.path)
+                // Pass the URL (not just the path) so the view model can mint a
+                // security-scoped bookmark from the drop's transient grant —
+                // otherwise the dropped folder is unreadable in the sandbox.
+                vm.acceptDroppedFolder(first, kind: kind)
                 return true
             }
 

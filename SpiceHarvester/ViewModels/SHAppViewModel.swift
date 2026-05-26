@@ -1200,7 +1200,14 @@ final class SHAppViewModel {
 
     /// Refreshes the list of `.md` files available in the configured prompt folder.
     /// Does not load any file – the user picks one from the list afterwards.
-    func reloadPromptFiles() {
+    /// - Parameter autoSelectLastLoaded: when `true` (explicit "Načíst"),
+    ///   re-selects the previously loaded `.md` if it still exists — which, via
+    ///   the `selectedPromptFile` onChange, reloads its content. When `false`
+    ///   (automatic reload on prompt-folder change) the list is refreshed but
+    ///   NO file is auto-loaded: merely switching folders must not overwrite the
+    ///   editor's `currentPrompt` (that would silently discard unsaved edits and
+    ///   break project round-trips).
+    func reloadPromptFiles(autoSelectLastLoaded: Bool = true) {
         let trimmed = config.promptFolder.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             availablePromptFiles = []
@@ -1225,12 +1232,22 @@ final class SHAppViewModel {
                 selectedPromptFile = nil
                 statusText = "Ve složce \(result.folderName) nejsou žádné .md soubory"
             } else {
-                // Preserve current selection if the previously loaded file still exists.
-                if !config.lastLoadedPromptName.isEmpty,
-                   let match = result.files.first(where: { $0.lastPathComponent == config.lastLoadedPromptName }) {
-                    selectedPromptFile = match
+                if autoSelectLastLoaded {
+                    // Explicit "Načíst": reopen the previously loaded file if it
+                    // still exists (the selectedPromptFile onChange then loads it).
+                    if !config.lastLoadedPromptName.isEmpty,
+                       let match = result.files.first(where: { $0.lastPathComponent == config.lastLoadedPromptName }) {
+                        selectedPromptFile = match
+                    } else {
+                        selectedPromptFile = nil
+                    }
                 } else {
-                    selectedPromptFile = nil
+                    // Auto-reload on folder change: refresh the list only, never
+                    // auto-load. Keep a still-valid selection; clear a dangling
+                    // one (setting nil doesn't trigger a content load).
+                    if let current = selectedPromptFile, !result.files.contains(current) {
+                        selectedPromptFile = nil
+                    }
                 }
                 statusText = "Nalezeno \(result.files.count) promptů v \(result.folderName)"
             }
@@ -1963,6 +1980,35 @@ final class SHAppViewModel {
             config.promptFolder = path
         }
         rememberRecentFolder(path, kind: kind)
+        persistAll()
+    }
+
+    /// Handles a folder dropped from Finder onto a folder row. A dropped URL
+    /// carries a transient sandbox grant, so we must capture a security-scoped
+    /// **bookmark** from it *now* — storing only the path string (as the old
+    /// drop handler did) loses all access, and a later read of the bare path
+    /// returns nothing (e.g. the prompt folder shows 0 `.md`, input shows 0 PDF).
+    /// Mirrors `pickFolder`'s post-NSOpenPanel side effects.
+    func acceptDroppedFolder(_ url: URL, kind: SHFolderKind) {
+        // Bracket access while we mint the bookmark (the grant on a dropped URL
+        // may need to be explicitly started before `bookmarkData` succeeds).
+        let didStart = url.startAccessingSecurityScopedResource()
+        storeBookmark(for: url)
+        if didStart { url.stopAccessingSecurityScopedResource() }
+
+        switch kind {
+        case .input:
+            config.inputFolder = url.path
+            invalidateCachedDocumentsIfInputChanged()
+            refreshInputFolderStats()
+        case .output:
+            config.outputFolder = url.path
+        case .cache:
+            config.cacheFolder = url.path
+        case .prompt:
+            config.promptFolder = url.path
+        }
+        rememberRecentFolder(url.path, kind: kind)
         persistAll()
     }
 
