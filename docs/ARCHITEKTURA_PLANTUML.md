@@ -38,7 +38,7 @@ package "Services" {
   [SHVisionOCRProvider\n(Task.detached + autoreleasepool)] as OCR
   [SHTextCleaningService\n(anchored patterns, v2)] as CLEAN
   [SHOpenAICompatibleClient\n(OpenAI-compatible + retry\n+ LM Studio /api/v0)] as LM
-  [SHPromptLibraryService\n(.md file picker)] as PROMPTS
+  [SHPromptLibraryService\n(rekurzivní enumerátor .md\nsouborů vč. podsložek)] as PROMPTS
   [SHPromptAnalyzer\n(mode suggestion heuristic)] as ANAL
   [SHBenchmarkService\n(wall-clock + phase metrics)] as BENCH
   [SHResultSchemaValidator\n(balanced-brace parser)] as VAL
@@ -59,7 +59,7 @@ APP --> HELP
 APP --> VM : @State (sdíleno\ns oběma scénami)
 CV --> VM
 SET --> VM
-HELP ..> CV : sheet
+APP ..> HELP : openWindow(id: "help")
 
 VM --> CFG
 VM --> PROMPTS
@@ -113,8 +113,8 @@ EXP ..> EXT : výsledky
   - Tab OCR: `Picker(.inline)` na `SHOCRBackend`.
   - Tab Cache: toggle `bypassInferenceCache`, `Vyčistit cache` s `role: .destructive`.
 
-- **`HelpSheet`** (Cmd+? nebo toolbar tlačítko):
-  - Modální sheet bez vlastního state, dismiss callback z parenta. Sekce: Co aplikace dělá / Co si připravit / Postup / Režimy / Tipy.
+- **`HelpSheet`** (Cmd+?):
+  - Samostatné okno (Window scene, singleton); `HelpSheet` view uvnitř `HelpWindowView`, dismiss přes `dismissWindow`. Sekce: Co aplikace dělá / Co si připravit / Postup / Režimy / Tipy.
 
 - **`SHAppViewModel`**:
   - Centrální orchestrátor běhu (`@MainActor @Observable`)

@@ -165,9 +165,9 @@ Aplikace se při spuštění jobu probudí na popředí (`openAppWhenRun: true`)
    - `Vstup` — kde jsou PDF
    - `Výstup` — kam se zapíšou výsledky
    - `Cache` — kde bude JSON cache (může být kdekoli, klidně v projektové složce)
-   - `Prompty (.md)` — složka s .md soubory obsahujícími prompty *(volitelné)*
+   - `Prompty (.md)` — složka s .md soubory obsahujícími prompty *(volitelné)*. Soubory se hledají **rekurzivně včetně podsložek** (SHPromptLibraryService používá `FileManager.enumerator`).
 
-   > **Tip 1:** cestu lze nastavit **přetažením složky z Finderu** přímo do políčka cesty. Tlačítko „Vybrat" / „Změnit" otevře klasický picker.
+   > **Tip 1:** cestu lze nastavit **přetažením složky z Finderu** přímo do políčka cesty. Tlačítko „Vybrat" / „Změnit" otevře klasický picker. Přetažená složka si zároveň uloží security-scoped bookmark (stejně jako při výběru přes picker), takže zůstane čitelná i přes sandbox napříč session.
    >
    > **Tip 2:** po prvním výběru se další picker otevře v nadřazené složce tvého výběru. Sourozenecké složky projektu jsou tak na jeden klik.
 
@@ -201,7 +201,7 @@ Aplikace se při spuštění jobu probudí na popředí (`openAppWhenRun: true`)
 - **Status pill (vlevo)** — call-to-action: „Zadej cesty ke složkám", „Můžeš spustit", „Server odpojen" (červeně po health-watcher detekci). Při běhu spinner + „Zpracovávám…".
 - **Spustit / Přerušit (Cmd+R / Cmd+.)** — jeden slot. **Spustit** je `.borderedProminent` modré (primary CTA), **Přerušit** je `.bordered` červené (destructive). Při běhu se přepne automaticky.
 - **Výstup (Cmd+Shift+O)** — otevře výstupní složku ve Finderu. Také je to **drag source**: přetáhni tlačítko na Finder / Slack / Mail = output folder se předá jako file representation.
-- **Nápověda (Cmd+?)** — otevře help sheet (toto okno).
+- **Nápověda (Cmd+?)** — otevře samostatné okno nápovědy.
 - **Adaptive labels**: když je okno úzké (~< 940 pt), tlačítka se zobrazí jen jako ikony (tooltipy zachovány).
 
 ### Konfigurační sloupec
@@ -374,7 +374,7 @@ Není vybraný model. Klikni **Ověřit server** a pak vyber v pickeru **Inferen
 Klikni znovu **Ověřit server** a v pickeru **Inference** vyber model, který se načetl z aktuálního serveru. Aplikace při změně serveru výběry modelů čistí a při ověření neplatný inference model nahrazuje prvním dostupným, ale chyba se může objevit, pokud se model na backendu mezitím odnačetl nebo přejmenoval. V režimu SEARCH stejně zkontroluj i **Embedding** model; některé MLX servery umí chat, ale nemusí vystavovat `/v1/embeddings`.
 
 ### 2) „Ověření selhalo"
-Zkontroluj **Base URL**, API key a běžící lokální AI server. Retry se u transient chyb (502/503/504/timeout) dělá automaticky s backoffem 1 s → 3 s → 9 s.
+Zkontroluj **Base URL**, API key a běžící lokální AI server. Retry se u transient chyb (502/503/504/timeout) dělá automaticky s backoffem 1 s → 3 s (max 3 pokusy).
 
 ### 3) CONSOLIDATE vrací „Vstup překračuje kontext modelu"
 Už se to **nemělo** stát — pipeline při překročení automaticky přejde na **map-reduce**. Uvidíš ve statusbaru např. *"Map-reduce: 16 dok → 4 dávky + 1 reduce"*. Běh trvá déle (K+1 LM volání místo 1), ale projde i pro libovolně velký batch.
@@ -394,7 +394,7 @@ SEARCH pokračuje dál s původním embedding rankingem a zapíše varování do
 VLM OCR posílá každou skenovanou stránku jako obrázek do lokálního modelu, takže je výrazně pomalejší než Apple Vision. Pro běžné skeny používej **Vision→VLM**; čisté **oMLX/VLM** nech pro případy, kdy potřebuješ lepší layout/tabulky nebo Apple Vision selhává.
 
 ### 5) Nezobrazují se prompty
-Zkontroluj, že složka obsahuje `.md` soubory a byla vybrána přes **Vybrat** (nejenom vepsaná ručně — sandbox vyžaduje security scope, který si appka uloží při výběru přes picker).
+Zkontroluj, že složka obsahuje `.md` soubory a byla vybrána přes **Vybrat** (nejenom vepsaná ručně — sandbox vyžaduje security scope, který si appka uloží při výběru přes picker). `.md` soubory se hledají **rekurzivně i v podsložkách**.
 
 ### 6) Po updatu appky vidím starou LLM odpověď
 Cache key se invaliduje automaticky při změně **verze cleaneru** nebo **schema version**. Ale pokud jen upravíš nestrukturální kód, starý klíč platí. Pokud potřebuješ vynucený re-run, otevři **Předvolby → Cache** (Cmd+,) a klikni **Vyčistit cache** nebo zaškrtni **Ignorovat cache LLM odpovědí**.

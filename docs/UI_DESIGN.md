@@ -20,7 +20,7 @@ Dokumentace vizuálních a interakčních prvků macOS aplikace. Zdroj: [Content
 ### Multi-window (`WindowGroup`)
 - **Primary**: `WindowGroup(id: "main")` — single instance, `vm = SHAppViewModel(persistenceMode: .persistent)`. UserDefaults read+write.
 - **Scratch**: `WindowGroup(id: "scratch", for: UUID.self)` — Cmd+Shift+N otevírá per-UUID nové okno. Každé má `SHScratchRoot` View s vlastním `vm = SHAppViewModel(persistenceMode: .scratch)`. UserDefaults write skip (config), read i write (server registry).
-- `@FocusedValue(\.showHelpBinding)` propaguje per-window `showHelp` → Cmd+? otevře help sheet **fokusovaného** okna, ne primary.
+- `@FocusedValue(\.focusedViewModel)` propaguje view-model **fokusovaného** okna pro routing menu příkazů. Cmd+? otevře singleton Help `Window(id: "help")` přes `openWindow` (ne sheet).
 
 ### Hlavní layout (`HSplitView`)
 Dvousloupcový `HSplitView`. Rozdělovač tažitelný; každý sloupec má `padding(14)`.
@@ -60,7 +60,7 @@ Druhá `Scene` v `SpiceHarvesterApp.body`. Otevírá nativní macOS Settings okn
 | OCR | `doc.text.viewfinder` | OCR backend (`Picker(.inline)`) — Apple Vision / oMLX/VLM / Vision→VLM, s vysvětlujícím footerem |
 | Cache | `externaldrive` | Toggle „Ignorovat cache LLM odpovědí", Vyčistit cache (`role: .destructive`) |
 
-Frame: **620 × 540 pt**. Sdílí `vm` s hlavním oknem přes `@State` na úrovni App scene.
+Frame: **620 × 580 pt**. Sdílí `vm` s hlavním oknem přes `@State` na úrovni App scene.
 
 Tab selector:
 - Nad přepínačem je titul aktivního tabu (`.title2.bold`, `.primary`).
@@ -69,10 +69,10 @@ Tab selector:
 - Nevybrané taby používají `.secondary`.
 
 ### Commands menu (`.commands`)
-SpiceHarvesterApp registruje čtyři skupiny:
-- `CommandGroup(replacing: .newItem)` — Spustit / Přerušit / Předzpracování / Extrakce / Otevřít výstup
-- `CommandGroup(after: .saveItem)` — Uložit projekt jako… / Otevřít projekt… / Nové okno
-- `CommandGroup(after: .toolbar)` — Režim FAST / SEARCH / CONSOLIDATE
+SpiceHarvesterApp registruje:
+- `CommandGroup(replacing: .newItem)` — Nové okno (Cmd+Shift+N) / Otevřít projekt (Cmd+O) / „Otevřít nedávné" submenu
+- `CommandGroup(after: .saveItem)` — Uložit projekt jako… (Cmd+Shift+S) / Otevřít výstup ve Finderu (Cmd+Shift+O)
+- `CommandMenu("Pipeline")` — Spustit (Cmd+R) / Přerušit (Cmd+.) / Předzpracování (Cmd+Shift+P) / Extrakce (Cmd+Shift+E) / Režim FAST / SEARCH / CONSOLIDATE (Cmd+1/2/3) / „Znovu ověřit zdraví serveru"
 - `CommandGroup(replacing: .help)` — „Nápověda Spice Harvester" (s `@FocusedValue` routing)
 
 Klávesové zkratky:
@@ -98,8 +98,8 @@ Plus **Tab/Shift+Tab + Cmd+F + Esc** přes vlastní `NSEvent.addLocalMonitorForE
 
 Disabled stav položek se řídí `vm.canRunAll`, `vm.canRunPreprocessing`, `vm.canRunExtraction`, `vm.canOpenOutput`, `vm.canSaveProject`, `vm.isRunning`.
 
-### Help sheet
-Modální sheet otevíraný z toolbar tlačítka i z menu (Cmd+?). Obsahem dokumentace `Co aplikace dělá / Co si připravit / Postup / Režimy / Tipy`. Detail viz §27.
+### Help okno
+Samostatná singleton **Window** scéna (`Window("Nápověda Spice Harvester", id: "help")`, nikoli sheet), otevíraná přes `openWindow(id: "help")` z tlačítka „Nápověda" v run row i z Help command (Cmd+?). Obsahem dokumentace `Co aplikace dělá / Co si připravit / Postup / Režimy / Tipy`. Detail viz §27 a §29.17.
 
 ---
 
@@ -110,7 +110,7 @@ Aplikace používá systémové sémantické barvy – ladí se automaticky s **
 | Role | Barva | Použití |
 |---|---|---|
 | **Primární akce** | `.blue` | Běžná tlačítka, verify, načíst, refresh, „Spustit" v toolbaru |
-| **Prominentní akce** | `.blue` + `.borderedProminent` | (rezervováno; v hlavním okně už nemáme prominentní button — Run je v toolbaru) |
+| **Prominentní akce** | `.blue` + `.borderedProminent` | Hlavní CTA „Spustit" v run row (spodek levého sloupce), `.tint(.blue)` |
 | **Úspěch / potvrzení** | `.green` | Vybraná složka (ikona), ověřený server, „Hotovo", řádek „Dokončeno", status indicator dot |
 | **Destruktivní** | `.red` | Tlačítko „Přerušit" v toolbaru, „Vyčistit cache" v Settings |
 | **Přerušeno** | `.gray` | Completion banner po přerušení |
@@ -133,12 +133,12 @@ Conflict bannery a completion banner používají vzor **`tint.opacity(0.10)` fi
 | Hlavní název aplikace | `.title2` | `.bold` |
 | Nadpis karty | `.subheadline` | `.semibold` (secondary tint) |
 | Label v řádku složky | `.body` | `.medium` |
-| Toolbar status text | `.callout` | default (secondary) |
+| Status text (run row) | `.body` | default (secondary) |
 | Název konfliktu / completion banner | `.footnote` / `.subheadline` | `.semibold` |
 | Zpráva konfliktu | `.caption` | — |
 | Popisky (label, caption v kartě) | `.caption` | default |
 | Subtitle pod názvem | `.caption` | default |
-| Status bar | `.caption` | default |
+| Status bar | `.body` | default |
 | Mode caption pod segmented | `.caption` | default (secondary) |
 | Monospace (cesty, URL, log, prompt) | `.system(design: .monospaced)` | — |
 | Log | `.system(size: 10.5, design: .monospaced)` | — |
@@ -257,8 +257,8 @@ Bílá matná karta s frosted-glass efektem. Použita pro **každou sekci** hlav
 **Read-only path + drag-and-drop**. Cesty se na macOS nepíšou rukou, takže textfield je pasivní zobrazovač s drop-targetem.
 
 - Label (ikona + název, **width 130 pt**). Ikona **zelená** pokud je složka vybraná (`!path.isEmpty`), jinak `.secondary`.
-- Path display: `Text` v rounded boxu (`.quinary` bg + 0.5 pt stroke), monospace, `lineLimit(1) .truncationMode(.middle)`. Idle stav = `—` v `.tertiary` barvě. Plná cesta v `.help(...)` tooltipu.
-- Drop target: `.dropDestination(for: URL.self) { urls, _ in … }` přes path display. Akceptuje pouze **adresáře** (kontrola `FileManager.fileExists(atPath:isDirectory:)` + `isDir.boolValue`).
+- Path display: `Text` v rounded boxu (`.quinary` bg + 0.5 pt stroke), monospace, `lineLimit(1)`, **zarovnáno doprava** s ořezem na začátku (`.truncationMode(.head)` + `.multilineTextAlignment(.trailing)` + `frame(alignment: .trailing)`) — vidět zůstává konec cesty (název složky), ne začátek. Idle stav = `—` v `.tertiary` barvě. Plná cesta v `.help(...)` tooltipu.
+- Drop target: `.dropDestination(for: URL.self) { urls, _ in … }` přes path display. Akceptuje pouze **adresáře** (kontrola `FileManager.fileExists(atPath:isDirectory:)` + `isDir.boolValue`). Předává **`URL`** do `vm.acceptDroppedFolder(_:kind:)`, které z transientního sandbox grantu vytvoří security-scoped bookmark — jinak by přetažená složka byla v sandboxu nečitelná.
 - Tlačítko vpravo: `.bordered`, vždy `.blue` tint. Label se mění **„Vybrat" → „Změnit"** podle stavu, ale styl zůstává konzistentní (vizuální stavová informace nese ikona vlevo). Min šířka 64 pt.
 - Kliknutí vždy otevře `NSOpenPanel`.
 
@@ -271,15 +271,15 @@ Bílá matná karta s frosted-glass efektem. Použita pro **každou sekci** hlav
   - Neověřeno → `.bordered` tint `.blue`, label „Ověřit".
   - Ověřeno → `.bordered` tint `.green`, label „Ověřeno", `checkmark.seal.fill`. Klik = re-verify.
 - TextField název / Base URL / SecureField API Key – všechny `.roundedBorder`. URL a API key editace invaliduje ověření.
-- Model pickery v **`Grid(2×2)`**: `Inference` + `Embedding` v první řadě, `Reranker` + `OCR/VLM` v druhé. Šířka pickerů roste s obsahem (ne fixní 320 pt) — užší levý sloupec by 320 pt nepojal.
+- Model pickery v **`Grid(2×2)`**: `Inference` + `OCR/VLM` v první řadě, `Embedding` + `Reranker` v druhé řadě (jen v SEARCH režimu). Šířka pickerů roste s obsahem (ne fixní 320 pt) — užší levý sloupec by 320 pt nepojal.
 - **Žádný OCR backend picker, žádné Steppery** — přesunuto do Settings (§1, §28.3).
 - **Režim extrakce** (`modeRow`): caption „Režim extrakce" + hint ikona, segmented `Picker`, **vícřádkový popis aktivního režimu pod pickerem** (`modeHintText` v `.caption .secondary`, `fixedSize(vertical: true)`). Vpravo malá `.tertiary` poznámka „Pokročilá nastavení v Předvolbách (Cmd+,)" jako wayfinding.
 
 ### 5.5 Prompt editor
-- Horní lišta: tlačítko **„Načíst"** (`.bordered` blue, disabled podle `canLoadPrompts`), picker se soubory (max 240 pt) nebo fallback hláška ve **Capsule** (`.quaternary` bg).
+- Horní lišta: tlačítko **„Načíst"** (`.bordered` blue, disabled podle `canLoadPrompts`), picker se soubory (max 240 pt) nebo fallback hláška ve **Capsule** (`.quaternary` bg). Seznam `.md` se navíc **automaticky** obnoví při každé změně složky promptů (`.onChange(of: promptFolder)` → `reloadPromptFiles(autoSelectLastLoaded: false)`) — uživatel nemusí „Načíst" klikat. Automatický reload jen listuje (rekurzivně, vč. podsložek), nikdy nenačítá obsah souboru, aby nepřepsal rozeditovaný prompt; explicitní „Načíst" (`autoSelectLastLoaded: true`) naopak znovu otevře posledně načtený soubor.
 - Dvojice tlačítek **„nothink"** / **„think"** (`.bordered` `.controlSize(.small)`) — aktivní mód má green/orange tint, nečinný blue.
 - Tlačítko **„Vymazat"** (`.borderless` blue) – zobrazí se jen pokud existuje text.
-- `TextEditor` monospace 12 pt, minHeight 160 / maxHeight 280, `.scrollContentBackground(.hidden)`, bg `.quinary` s `cornerRadius 6`, subtle border 0.5 pt.
+- `TextEditor` monospace 12 pt, minHeight 160 / maxHeight .infinity (editor vyplní celý VSplitView pane), `.scrollContentBackground(.hidden)`, bg `.quinary` s `cornerRadius 6`, subtle border 0.5 pt.
 - Placeholder přes ZStack: „Zadej prompt…" `.tertiary` barvou, `.allowsHitTesting(false)` (text-field pozadí zůstává klikatelné). Padding zarovnán na skutečný počátek textu v `TextEditoru` (`leading 11` = outer `.padding(6)` + 5 pt line-fragment padding `NSTextView`, `top 6`), aby kurzor stál přesně na placeholderu.
 
 ### 5.6 Conflict banner
@@ -340,20 +340,18 @@ Poslední řádek karty během běhu. Hodnota vychází z `SHProgressViewState.h
 ETA se přepočítá přes `recalculateEta()` – vybere správný čitač podle `phase`.
 
 ### 5.9 Log card
-- `Text` (nikoli TextEditor) v ScrollView → neztrácí cursor při re-renderingu a umožňuje auto-scroll na konec.
-- Monospace 10.5 pt, `.textSelection(.enabled)` (copy-paste povoleno).
-- Auto-scroll na nový obsah přes `ScrollViewReader.scrollTo("logBottom", anchor: .bottom)` s `withAnimation(.easeOut(duration: 0.15))`.
-- **Refresh button** (`Label("Obnovit", systemImage: "arrow.clockwise")`, `.borderless` blue, `.controlSize(.small)`) zarovnaný vpravo nad scroll plochou — `vm.logText` se z disku obnovuje až mezi fázemi, takže během dlouhého runu uživatel potřebuje manuální tail re-read.
+- Tělo logu je `SHLogTextView` — `NSViewRepresentable` obalující `NSTextView` (viz §29.6), monospace 10.5 pt, copy-paste povoleno, vlastní auto-scroll na konec bez ztráty kurzoru.
+- Toolbar nad scroll plochou: **filtr** `TextField("Filtr (Cmd+F)")`, **xmark** tlačítko pro vymazání filtru, **„Kopírovat"** (`Label("Kopírovat", systemImage: "doc.on.doc")`) a **„Obnovit"** (`Label("Obnovit", systemImage: "arrow.clockwise")`, `.borderless` blue, `.controlSize(.small)`) — `vm.logText` se z disku obnovuje až mezi fázemi, takže během dlouhého runu uživatel potřebuje manuální tail re-read.
 - Log scroll plocha: `frame(minHeight: 200, maxHeight: .infinity)` — využije celou zbylou výšku pravého sloupce (hostuje `frame(maxHeight: .infinity)` na celé kartě).
 - Bg `.quinary` + cornerRadius 6.
 - Pravý sloupec **není** wrapnutý v outer `ScrollView`, takže log scroll vlastní gesta bez konfliktu s rodičovským scrollem (typický macOS footgun u nested ScrollView byl odstraněn).
 
 ### 5.10 Status bar (dolní lišta)
-- Výška ≈ textu + `padding(horizontal: 12, vertical: 5)`.
+- Výška fixně **34 pt** (`minHeight: 34, maxHeight: 34`).
 - Indikátor vlevo:
   - Running → `ProgressView(.mini)`, accessibility „Probíhá zpracování".
-  - Idle → zelená tečka `circle.fill` **10 pt**, accessibility „Připraveno".
-- `vm.statusText` (caption, lineLimit 1, truncationMode `.middle`).
+  - Idle → zelená tečka `circle.fill` **8 pt**, accessibility „Připraveno".
+- `vm.statusText` (`.body`, lineLimit 1, truncationMode `.middle`).
 - Pozadí `.thinMaterial` + horní `Divider` overlay.
 
 ---
@@ -363,16 +361,17 @@ ETA se přepočítá přes `recalculateEta()` – vybere správný čitač podle
 ### Button styly
 | Styl | Kdy |
 |---|---|
-| `.borderedProminent` | Settings „destructive" Vyčistit cache (přes `role`). V hlavním okně se neprominuje, primární CTA žije v toolbaru. |
+| `.borderedProminent` | Primární CTA „Spustit" v run row (spodek levého sloupce), `.tint(.blue)`. |
 | `.bordered` | 80 % tlačítek – sekundární akce (Načíst, Verify, Vybrat/Změnit, „nothink/think", „Potvrdit" u completion banneru, „Obnovit" log) |
 | `.borderless` | Ikonická / inline tlačítka (+/− server, „Vymazat" prompt, refresh log icon) |
-| toolbar default | Run / Stop / Output / Help — bez explicitního stylu, NSToolbar řeší vizuál |
+| default (Form) | Settings „Vyčistit cache" — `Button(role: .destructive)` s výchozím button stylem (NE `.borderedProminent`) |
+| run row default | Stop / Output / Help — bez explicitního stylu, žijí v run row (spodek levého sloupce) |
 
 ### Stavové flipy (stejné tlačítko, jiný tint/label/ikona)
 Silný UX vzor – tlačítko **nemění pozici**, mění vzhled:
 - **Vybrat / Změnit** ve folder rowech (label se mění, tint i ikona zůstávají — stavovou informaci nese **zelená ikona vlevo**, ne tlačítko)
 - **Ověřit / Ověřeno** (blue checkmark.seal → green checkmark.seal.fill)
-- **Spustit (toolbar) → Přerušit (toolbar)** — ve stejném slotu se mění z `play.fill` `.primary` na `stop.circle.fill` `.destructive`
+- **Spustit (run row) → Přerušit (run row)** — ve stejném slotu se mění z `play.fill` `.primary` na `stop.circle.fill` `.destructive`
 
 ### Disabled stav
 `.disabled(!condition)`, kde `condition` je computed property na view modelu (`canRunAll`, `canVerifyServer`, `canLoadPrompts`, `canOpenOutput`, …). Disabled tlačítka si ponechávají pozici a barevný tint – signalizují „existuje, ale zatím nepoužitelné".
@@ -475,13 +474,13 @@ SwiftUI materials jsou použity s jasnou sémantikou:
 | Pravý sloupec HSplitView | min **420 pt** |
 | Ikona ve statRow | **14 pt** |
 | Logo | **36 × 36 pt** |
-| Min šířka okna | **980 pt** |
-| Min výška okna | **680 pt** |
+| Min šířka okna | **940 pt** |
+| Min výška okna | **660 pt** |
 | Default šířka okna při prvním launchi | **1180 pt** |
 | Default výška okna při prvním launchi | **980 pt** |
 | Preferred šířka okna při launchi | **1200 pt** compact / **1320 pt** large screen |
 | Výška okna při launchi | `screen.visibleFrame.height` |
-| Settings sheet | **620 × 540 pt** |
+| Settings sheet | **620 × 580 pt** |
 | Help sheet | min **640 × 600**, ideal **720 × 780**, max **900 × ∞** |
 
 Modelové pickery a server picker už **nemají fixní šířku** — flexnou se uvnitř Gridu/HStack pod limitem sloupce. Steppery a OCR backend picker mají vlastní layout v Settings (Form `.grouped`).
@@ -628,20 +627,20 @@ macOS tooltip funguje i na disabled tlačítkách – uživatel najede myší a 
 
 ---
 
-## 16. State machine – Run/Stop v toolbaru
+## 16. State machine – Run/Stop v run row
 
 ```
          ┌─────────────────────────────┐
          │  IDLE                        │
-         │  toolbar: [Spustit (play)]  │
+         │  run row: [Spustit (play)]  │
          │  body:    [Průběh idle]     │
          │           [Log]              │
          └──────┬───────────────────────┘
-                │ Cmd+R / toolbar click
+                │ Cmd+R / run row click
                 ▼
          ┌─────────────────────────────┐
          │  RUNNING                     │
-         │  toolbar: [Přerušit (stop)] │
+         │  run row: [Přerušit (stop)] │
          │  body:    [Průběh active]   │
          │           [Log]              │
          └──────┬───────────────────────┘
@@ -649,7 +648,7 @@ macOS tooltip funguje i na disabled tlačítkách – uživatel najede myší a 
                 ▼
          ┌─────────────────────────────┐
          │  COMPLETED                   │
-         │  toolbar: [Spustit] (zpět)   │
+         │  run row: [Spustit] (zpět)   │
          │  body:    [Completion       │
          │            banner: Hotovo|  │
          │            Přerušeno|Selhalo] │
@@ -661,7 +660,7 @@ macOS tooltip funguje i na disabled tlačítkách – uživatel najede myší a 
               IDLE
 ```
 
-Output (toolbar) a Help (toolbar) jsou vždy přítomné, bez ohledu na stav. Předzpracování a Extrakce jsou v menu (Cmd+Shift+P / Cmd+Shift+E), nikoli v body.
+Output (run row) a Help (run row) jsou vždy přítomné, bez ohledu na stav. Předzpracování a Extrakce jsou v menu (Cmd+Shift+P / Cmd+Shift+E), nikoli v body.
 
 ---
 
@@ -752,7 +751,7 @@ V hlavním okně už **není** žádný „Pracuji" prominent button – Run/Sto
 | Conflict banner / completion banner message | `fixedSize(horizontal: false, vertical: true)` – wrapuje libovolně na výšku |
 | Mode caption | `fixedSize(horizontal: false, vertical: true)` – 1–2 řádky podle režimu |
 | Log | bez limitu, monospace, auto-scroll |
-| Prompt TextEditor | `minHeight 160`, `maxHeight 280` – rozšiřitelný, ale nemaže zbytek UI |
+| Prompt TextEditor | `minHeight 160`, `maxHeight .infinity` – vyplní celý VSplitView pane |
 
 ---
 
@@ -761,7 +760,7 @@ V hlavním okně už **není** žádný „Pracuji" prominent button – Run/Sto
 - Každá ikona **bez textového labelu** má `.accessibilityLabel` (+/− server, status tečka, „Obnovit" log).
 - Každé tlačítko s netriviální funkcí má `.help` (tooltip). Text je česky, věcný, často s klávesovou zkratkou.
 - Status bar i toolbar status hlásí VoiceOveru **plnou větu**: „Stav: {statusText}", ne jen „statusText".
-- Při běhu (`isRunning`) je toolbar indikátor `ProgressView(.small)` s textem; v idle je zelená tečka 9 pt s textem.
+- Při běhu (`isRunning`) je toolbar indikátor `ProgressView(.small)` s textem; v idle je zelená tečka 8 pt s textem.
 
 ---
 
@@ -775,7 +774,7 @@ SwiftUI `.defaultSize` se aplikuje jen **první spuštění**. `SHAppDelegate` p
 4. Šířka: pokud `visible.width >= 1440` a `visible.height >= 1100`, použije `largePreferredWidth 1320 pt` capped `visible.width`; jinak použije max aktuální šířky a `compactPreferredWidth 1200 pt`, také capped `visible.width`.
 5. Horizontálně vycentruje, bottom-align (pracuje s Cocoa souřadným systémem – Y roste nahoru).
 
-**Při refaktoringu nepřepisovat v SwiftUI** – použít tento AppDelegate jako single source of truth pro velikost okna. Aplikuje se jen na hlavní `WindowGroup`; Settings okno má vlastní velikost (620 × 540, viz §1).
+**Při refaktoringu nepřepisovat v SwiftUI** – použít tento AppDelegate jako single source of truth pro velikost okna. Aplikuje se jen na hlavní `WindowGroup`; Settings okno má vlastní velikost (620 × 580, viz §1).
 
 ---
 
@@ -790,7 +789,6 @@ Některé flagy **nežijí napříč restarty** záměrně:
 | `lastCompletion` | session only | Uživatel ji acknowledgne klikem v completion banneru, pak mizí |
 | `logText` | session only | Nový běh = čistý log |
 | `progressState`, `benchmark` | per-run | Reset na start nového běhu |
-| `showHelp` | App-level `@State` | Sheet visibility, sdílená mezi toolbar buttonem a Help menu |
 
 Všechno ostatní v `SHAppConfig` + `servers` je **perzistentní** přes `persistAll` / `persistAllDebounced`.
 
@@ -873,8 +871,8 @@ Při refaktoringu nebo přidání nového pole/tlačítka:
 
 ### 27.4 Spouštění
 
-- Stav `showHelp` žije na úrovni App scene (`@State`) — sdílen mezi toolbar buttonem (`Binding`) a `CommandGroup(replacing: .help)` položkou.
-- `.sheet(isPresented: $showHelp) { HelpSheet(dismiss: { showHelp = false }) }` aplikován na **vnější VStack** v `ContentView.body`.
+- Help je prezentován jako samostatná `Window(id: "help")` scéna (viz §29.17), nikoli sheet.
+- Otevírá se přes `openWindow(id: "help")` (z run-row tlačítka „Nápověda" i z `CommandGroup(replacing: .help)`), zavírá přes `@Environment(\.dismissWindow)`.
 
 ### 27.5 Kdy použít tento vzor vs. jiné modální typy
 
@@ -950,13 +948,13 @@ Hlavní spacing/typografie tokeny:
 | App title | `.title2.bold` |
 | Subtitle | `.caption` |
 | Folder row label width | 130 |
-| Prompt editor min/max výška | 160 / 280 |
+| Prompt editor min/max výška | 160 / .infinity |
 | Prompt editor font | 12 pt mono |
 | Log min výška | 200 |
 | Log font | 10.5 pt mono |
-| Status bar font | `.caption` |
-| Status bar dot | **10 pt** (zvětšeno z 7 pt — accessibility) |
-| Min window | 980 × 680 |
+| Status bar font | `.body` |
+| Status bar dot | **8 pt** |
+| Min window | 940 × 660 |
 | Preferred width | 1200 compact / 1320 large screen |
 
 ### 28.5 Kdy se od Compact Glass odchýlit

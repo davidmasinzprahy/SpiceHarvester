@@ -138,6 +138,8 @@ Poznámka k runtime: **při startu se část hodnot záměrně resetuje** (slož
 
 **Recent-folder bookmarky přežívají reset**: `config.folderBookmarks` se při startu maže, ale cesty v `recentFolders` se obnovují z UserDefaults. Aby výběr nedávné složky měl v sandboxu scoped přístup (jinak sken vrátí 0 PDF), drží se security-scoped bookmarky pro nedávné cesty v samostatném trvalém úložišti `recentFolderBookmarks: [String: Data]` (UserDefaults klíč `SHRecentFolderBookmarks`), analogicky k `projectBookmarks`. `resolveScopedURL` na toto úložiště padá jako **fallback** — záměrně se neseeduje zpět do `config.folderBookmarks`, aby se nezašpinil právě vyčištěný config slot. Při startu se store načte a profiltruje na cesty stále přítomné v `recentFolders` (bounded). Viz `resolveScopedURL`, `storeBookmark`, `staleSandboxPaths`.
 
+**Sandbox přístup ke složkám**: každá cesta musí mít platný security-scoped bookmark, jinak ji sandbox nepřečte (sken vrátí prázdno). Bookmark vzniká při `NSOpenPanel` výběru (`pickFolder` → `storeBookmark`) i při **přetažení z Finderu** (`acceptDroppedFolder(_:kind:)` — z transientního grantu na dropnutém `URL` vytvoří bookmark; pouhé uložení cesty jako string by přístup ztratilo). `storeBookmark` zrcadlí bookmark i do `recentFolderBookmarks`.
+
 **Flush při ukončení**: `NSApplication.willTerminateNotification` → `persistAll()` (vynutí zapsání jakékoli pending debounced změny).
 
 ### Registry serverů
@@ -159,7 +161,7 @@ Model selection (`selectedInferenceModel`, `selectedEmbeddingModel`, `selectedRe
 **Retry na transient chyby** (`send(_:)` wrapper):
 - HTTP 502/503/504
 - `URLError.timedOut`, `.networkConnectionLost`, `.cannotConnectToHost`, `.dnsLookupFailed`
-- Exponenciální backoff: 1 s → 3 s → 9 s (cap 10 s), `maxAttempts = 3`
+- Exponenciální backoff `min(10, pow(3, attempt-1))`: 1 s → 3 s (cap 10 s). Při `maxAttempts = 3` proběhnou jen 2 retry (delay 9 s by nastal až u 4. pokusu, který se nekoná).
 - `CancellationError` propaguje bez retry
 
 **LM Studio native API** (`fetchLoadedModels`):
@@ -239,7 +241,7 @@ Implementace:
 - Escape `|` → `¦` a newlines → space v polích (parseovatelný formát)
 
 Phase hodnoty:
-- `HASH`, `CACHE`, `TEXT`, `OCR`, `INFERENCE`, `INFERENCE-CACHE`, `EMBEDDING`, `VALIDATE`, `PREFLIGHT`, `PREPROCESS`
+- `HASH`, `CACHE`, `TEXT`, `OCR`, `INFERENCE`, `INFERENCE-CACHE`, `EMBEDDING`, `PREFLIGHT`, `PREPROCESS`, `PLAN` (consolidate packing), `REDUCE` (map-reduce reduce), `RERANK` (SEARCH reranking)
 
 ## 11. Benchmark
 
@@ -281,9 +283,10 @@ XLSX rozhraní `SHXLSXExporting` (`SHXLSXExportPlaceholder`) — nerealizováno;
 ### `SpiceHarvesterApp` (App scene) — multi-scene struktura
 
 Aplikace registruje **4 Scene**:
-- `WindowGroup(id: "main")` — primary okno s `vm = SHAppViewModel()` (`.persistent` mode, default), `showHelp` flag, `@State` na App scope. `.focusedSceneValue(\.showHelpBinding, $showHelp)` propaguje binding pro Cmd+? routing.
+- `WindowGroup(id: "main")` — primary okno s `vm = SHAppViewModel()` (`.persistent` mode, default). `.focusedSceneValue(\.focusedViewModel, vm)` propaguje view-model pro Cmd+? routing.
 - `Settings { SettingsView(vm:) }` — nativní Cmd+, sheet, sdílí primary's `vm` (Settings je vždy globální per-app).
-- `WindowGroup(id: "scratch", for: UUID.self) { _ in SHScratchRoot() }` — scratch okna otevíraná `openWindow(id: "scratch", value: UUID())` z menu Cmd+Shift+N. Každé má vlastní view-model (`.scratch` mode), vlastní `showHelp`, vlastní `.focusedSceneValue`.
+- `WindowGroup(id: "scratch", for: UUID.self) { _ in SHScratchRoot() }` — scratch okna otevíraná `openWindow(id: "scratch", value: UUID())` z menu Cmd+Shift+N. Každé má vlastní view-model (`.scratch` mode), vlastní `.focusedSceneValue(\.focusedViewModel, vm)`.
+- `Window("Nápověda Spice Harvester", id: "help")` — samostatné okno nápovědy (singleton), otevírané `openWindow(id: "help")`.
 - `defaultSize(width: 1180, height: 980)` na obou WindowGroup.
 
 `SHAppDelegate` (`NSApplicationDelegateAdaptor`):
@@ -291,11 +294,11 @@ Aplikace registruje **4 Scene**:
 - `UNUserNotificationCenterDelegate`: `willPresent` vrací `[.banner, .sound]` (banner i pro foreground), `didReceive` mapuje `OPEN_OUTPUT` action na `SHIntentNotifications.openOutput` post.
 - `handleOpenProjectOutcome(_:)` static helper renderuje alert pro `successNeedsRepick` / `failed` cases.
 
-`.commands` registruje 4 skupiny:
-1. `CommandGroup(replacing: .newItem)` — Spustit (Cmd+R) / Přerušit (Cmd+.) / Předzpracování (Cmd+Shift+P) / Extrakce (Cmd+Shift+E) / Otevřít výstup (Cmd+Shift+O)
-2. `CommandGroup(after: .saveItem)` — Uložit projekt jako… (Cmd+Shift+S) / Otevřít projekt… (Cmd+O) / Nové okno (Cmd+Shift+N)
-3. `CommandGroup(after: .toolbar)` — Režim FAST / SEARCH / CONSOLIDATE (Cmd+1 / Cmd+2 / Cmd+3)
-4. `CommandGroup(replacing: .help)` — Nápověda (Cmd+?), čte `@FocusedValue(\.showHelpBinding)` a fallbackne na primary's binding
+`.commands` registruje:
+1. `CommandGroup(replacing: .newItem)` — Nové okno (Cmd+Shift+N) / Otevřít projekt… (Cmd+O) / "Otevřít nedávné" submenu
+2. `CommandGroup(after: .saveItem)` — Uložit projekt jako… (Cmd+Shift+S) / Otevřít výstup ve Finderu (Cmd+Shift+O)
+3. `CommandMenu("Pipeline")` — Spustit (Cmd+R) / Přerušit (Cmd+.) / Předzpracování (Cmd+Shift+P) / Extrakce (Cmd+Shift+E) / Režim FAST / SEARCH / CONSOLIDATE (Cmd+1 / Cmd+2 / Cmd+3) / "Znovu ověřit zdraví serveru"
+4. `CommandGroup(replacing: .help)` — Nápověda (Cmd+?), volá `openWindow(id: "help")`
 
 Plus `installTabKeyMonitor()` v ContentView's `.onAppear` registruje `NSEvent.addLocalMonitorForEvents(matching: .keyDown)`:
 - **Tab/Shift+Tab** (keyCode 48 bez Cmd/Ctrl/Option) → `advanceFocus(reverse:)` přes `enabledFocusOrder` (filter podle `canX` predikátů)
@@ -340,7 +343,7 @@ Default macOS focus ring proti `.regularMaterial` v Light mode neviditelný. Cus
 - Aplikováno na: Run, Cancel, Output, Help, Verify, Načíst
 
 ### `SettingsView` (nativní macOS Settings scene)
-Settings je nativní `Settings { SettingsView(vm:) }` scéna, ale obsah nepoužívá systémový `TabView` tab strip. Kvůli chybě macOS renderování vybraného tab itemu ve světlém režimu má vlastní horní přepínač (`SettingsTab`) s explicitním `.primary` / `.secondary` textem. Okno má pevný frame **620×540 pt**, aby se vešel celý obsah bez useknutí spodních sekcí.
+Settings je nativní `Settings { SettingsView(vm:) }` scéna, ale obsah nepoužívá systémový `TabView` tab strip. Kvůli chybě macOS renderování vybraného tab itemu ve světlém režimu má vlastní horní přepínač (`SettingsTab`) s explicitním `.primary` / `.secondary` textem. Okno má pevný frame **620×580 pt**, aby se vešel celý obsah bez useknutí spodních sekcí.
 
 Struktura:
 - Horní titul `Text(selectedTab.title)` + tři ikonové buttony (`speedometer`, `doc.text.viewfinder`, `externaldrive`), vybraný tab má jemný primary background + stroke.
@@ -352,7 +355,7 @@ Struktura:
 Sdílí `vm` s hlavním oknem přes `@Bindable`; změny v Settings persistují přes `vm.persistAll()` / specializované setter metody.
 
 ### `HelpSheet`
-Modální sheet otevíratelný z toolbar tlačítka i z Cmd+?. Vlastní strukturované sekce (Co aplikace dělá, Co si připravit, Postup, Režimy, Tipy) s reusable helpery `section / paragraph / step / bullet / mode`. Bez vlastního state — dismiss callback dodává parent.
+View se strukturovanými sekcemi (Co aplikace dělá, Co si připravit, Postup, Režimy, Tipy) s reusable helpery `section / paragraph / step / bullet / mode`. Není to modální sheet — `HelpSheet` je obalen v `HelpWindowView` a zobrazen v samostatné `Window(id: "help")` scéně (viz §13), dismiss přes `@Environment(\.dismissWindow)`.
 
 ### `GlassCard`
 Sdílený materiálový kontejner. `.regularMaterial` + `RoundedRectangle(cornerRadius: 10, .continuous)` + 0.5 pt stroke `Color.primary.opacity(0.06)`. Header `HStack` s ikonou (`.caption`, `.secondary`, `.symbolRenderingMode(.hierarchical)`) + titulkem (`.subheadline.weight(.semibold)`, `.secondary`). Padding 12, VStack spacing 8.
@@ -410,6 +413,11 @@ var isVerifiedServerReachable: Bool = true
 - `recentFolders: [SHFolderKind: [String]]` (max `recentFoldersLimit = 5` per kind), `rememberRecentFolder(_:kind:)` push při folder pick.
 - Oba persisten do UserDefaults v `.persistent` mode (write přes `Task.detached(priority: .utility)` off-main).
 - `recentFolderBookmarks: [String: Data]` (UserDefaults `SHRecentFolderBookmarks`) — trvalé security-scoped bookmarky pro nedávné cesty, aby byly v sandboxu čitelné i po startu (kde se `config.folderBookmarks` maže). Zapisuje `storeBookmark` při picku, čte/profiltruje se v `init`, `resolveScopedURL` ho používá jako fallback. Viz sekce 6 (Konfigurace a persistence).
+
+#### Prompt library (.md soubory)
+- `reloadPromptFiles(autoSelectLastLoaded:)` listuje `.md` ve `config.promptFolder` přes `SHPromptLibraryService.listFiles` (rekurzivní `FileManager.enumerator`, vč. podsložek) pod scoped přístupem; výsledek do `availablePromptFiles`.
+- Volá se automaticky při změně složky promptů (`.onChange(of: promptFolder)` v `ContentView`, `autoSelectLastLoaded: false`) i explicitně tlačítkem **„Načíst"** (`true`).
+- `autoSelectLastLoaded: false` = jen obnovit seznam, **nenačítat obsah** souboru (jinak by kaskáda `selectedPromptFile` → `loadPromptFile` přepsala rozeditovaný `currentPrompt` a rozbila round-trip projektu). `true` znovu otevře `lastLoadedPromptName`.
 
 #### Save/Open Project
 - `SHProjectSnapshot: Codable, Sendable` (top-level v Models layer) — folders + model picks + extractionMode + prompt + lastLoadedPromptName + schemaVersion.
@@ -492,13 +500,12 @@ SpiceHarvester/
     SHAppViewModel.swift
   Views/
     GlassCard.swift       — sdílený materiálový kontejner
-    HelpSheet.swift       — nápověda (Cmd+?)
+    HelpSheet.swift       — nápověda (Cmd+?), zobrazena v samostatné Window scéně
     SettingsView.swift    — Settings scéna (Cmd+,) s taby Výkon/OCR/Cache + search
     SHLogTextView.swift   — NSViewRepresentable wrapping NSTextView (severity coloring)
   Services/
     SHBenchmarkService.swift
     SHConfigStore.swift
-    SHEmbeddingCache.swift
     SHFileScanService.swift
     SHOpenAICompatibleClient.swift
     SHOCRProvider.swift
@@ -514,7 +521,7 @@ SpiceHarvester/
     SHQueueManager.swift
   Cache/
     SHCacheManager.swift
-    SHInferenceCache.swift
+    SHInferenceCache.swift           — obsahuje i actor SHEmbeddingCache
   Logging/
     SHProcessingLogger.swift
   Export/

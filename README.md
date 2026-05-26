@@ -195,7 +195,7 @@ Steppery v **Předvolbách → Výkon** (`Cmd+,`):
 
 ### Sandbox a entitlementy
 - **App Sandbox** zapnutý (`com.apple.security.app-sandbox`).
-- **`NSAllowsLocalNetworking`** — ATS povolen pouze pro local network (LM Studio na localhost). Zpřísněno z `NSAllowsArbitraryLoads`, který by povoloval libovolné HTTP cíle.
+- **`NSAllowsLocalNetworking`** — ATS nastavení v Info.plist build settings (`INFOPLIST_KEY_NSAppTransportSecurity` v project.pbxproj), **ne** entitlement v `.entitlements` souboru. Povoluje ATS pouze pro local network (LM Studio na localhost). Zpřísněno z `NSAllowsArbitraryLoads`, který by povoloval libovolné HTTP cíle. (`.entitlements` obsahuje jen app-sandbox, files.user-selected.read-write, network.client a network.server.)
 - **`com.apple.security.files.user-selected.read-write`** — přístup pouze ke složkám, které uživatel explicitně vybral přes NSOpenPanel + jejich security-scoped bookmarks.
 - **`com.apple.security.network.client`** — odchozí HTTP požadavky na LM server.
 - **`com.apple.security.network.server`** — historicky vyžadováno pro localhost connections v některých macOS verzích. Pro pure-client app technicky nadbytečné, ale ponecháno z důvodu kompatibility.
@@ -252,7 +252,7 @@ SpiceHarvester/
 │  └─ SHAppViewModel.swift # @Observable @MainActor — config, runtime, persistence
 ├─ Views/
 │  ├─ GlassCard.swift      # Compact Glass card wrapper
-│  ├─ HelpSheet.swift      # Modal help sheet
+│  ├─ HelpSheet.swift      # Help view (zobrazen v samostatné Window scéně, ne sheet)
 │  ├─ SettingsView.swift   # Cmd+, sheet (Výkon / OCR / Cache, search field)
 │  └─ SHLogTextView.swift  # NSViewRepresentable wrapping NSTextView (severity colored)
 ├─ Services/               # SHPromptAnalyzer, SHFileScanService, SHTextCleaningService, …
@@ -266,7 +266,7 @@ SpiceHarvester/
 │  └─ SHQuickLookPreview.swift  # Provider source za #if QUICK_LOOK_EXTENSION (target chybí, viz P2 backlog)
 ├─ Localizable.xcstrings   # CS source + EN překlady
 ├─ ContentView.swift       # HSplitView root, runRow, focus management
-└─ SpiceHarvesterApp.swift # Scenes: WindowGroup primary + scratch + Settings; SHAppDelegate
+└─ SpiceHarvesterApp.swift # Scenes: WindowGroup primary + scratch + Settings + Help Window; SHAppDelegate
 ```
 
 Legacy implementace je archivována ve složce `Legacy/`.
@@ -304,7 +304,7 @@ xcodebuild test \
   -destination 'platform=macOS'
 ```
 
-Aktuálně 6 unit testů: merge výsledků, schema validace OK/FAIL, cache save/load/clear, CSV export, cleaner deduplikace.
+Aktuálně 11 unit testů (+ 2 integrační): merge výsledků, schema validace OK/FAIL, cache save/load/clear, CSV export, cleaner deduplikace, obnova `recentProjectURLs` z UserDefaults, `openProject` zapomene URL při nevalidním JSON, `recheckServerNow` bez vybraného serveru a cross-window observer recent-projects.
 
 UI testy běží ve světlém i tmavém režimu. Ověřují otevření Settings přes `Cmd+,`, existenci tabů `Výkon` / `OCR` / `Cache` a základní obsah každého tabu.
 
