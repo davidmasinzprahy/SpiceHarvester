@@ -151,6 +151,13 @@ enum SHOpenProjectOutcome {
     case cancelled
 }
 
+/// Outcome of `openSpiceResultFile`. Mirrors `SHOpenProjectOutcome` semantics.
+enum SHOpenSpiceResultOutcome {
+    case success(url: URL)
+    case failed(error: Error)
+    case cancelled
+}
+
 @MainActor
 @Observable
 final class SHAppViewModel {
@@ -182,6 +189,10 @@ final class SHAppViewModel {
     /// by clicking it. `nil` means either no run happened yet, or the last badge
     /// was already dismissed.
     var lastCompletion: SHRunCompletion?
+    /// When non-nil, the app is in "loaded result" mode — displaying a
+    /// `.spice-result.json` file the user opened rather than a live run.
+    /// Drives a distinct banner and disables all pipeline actions.
+    var loadedResult: SHExtractionResult?
     /// ID of the server for which verification last succeeded in this session. Used to
     /// style the "Ověřit server" button green only after a confirmed round-trip. Reset on
     /// server switch, edit, add, or remove.
@@ -1790,6 +1801,20 @@ final class SHAppViewModel {
         return openProject(at: url)
     }
 
+    /// Opens an open panel filtered to `.spice-result.json` files.
+    /// Returns the decoded outcome.
+    func openSpiceResultFile() -> SHOpenSpiceResultOutcome {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.title = "Otevřít výsledek…"
+        panel.message = "Vyber .spice-result.json soubor exportovaný přes Export → JSON"
+        guard panel.runModal() == .OK, let url = panel.url else { return .cancelled }
+        return openSpiceResultFile(url)
+    }
+
     /// Direct-path variant of `openProject` used by `File → Otevřít
     /// nedávné…` menu items. Skips the open panel and decodes from the
     /// known URL. If decoding fails (file missing, format invalid), the
@@ -3004,6 +3029,45 @@ final class SHAppViewModel {
         logger = newLogger
         loggerOutputPath = output.path
         return newLogger
+    }
+
+    // MARK: – Open .spice-result.json
+
+    /// Opens a `.spice-result.json` file, decodes it, and displays the
+    /// extraction result in the UI. Puts the app into "loaded result"
+    /// mode (offline from the pipeline) — all run/stop/mode buttons are
+    /// disabled until the user dismisses the result.
+    func openSpiceResultFile(_ url: URL) -> SHOpenSpiceResultOutcome {
+        // Acquire security-scoped access if needed.
+        var scopedStarted = false
+        defer {
+            if scopedStarted {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        // Try to acquire security-scoped resource.
+        guard url.startAccessingSecurityScopedResource() else {
+            scopedStarted = false
+            // If we have a bookmark, try to resolve it instead.
+            // This shouldn't happen for normal file-open but handle gracefully.
+            statusText = "Nelze získat přístup k souboru \(url.lastPathComponent)"
+            return .failed(error: SHProjectError.permissionDenied(url: url))
+        }
+        scopedStarted = true
+
+        do {
+            let data = try Data(contentsOf: url)
+            let result = try SHJSON.decoder().decode(SHExtractionResult.self, from: data)
+            self.loadedResult = result
+            statusText = "Načteno: \(result.patient_name ?? "—") (\(result.source_file))"
+            self.lastCompletion = .success
+            return .success(url: url)
+        } catch {
+            self.loadedResult = nil
+            statusText = "Nelze načíst výsledek: \(error.localizedDescription)"
+            return .failed(error: error)
+        }
     }
 }
 

@@ -152,7 +152,7 @@ final class SHExportService {
                 counter += 1
             }
             used.insert(candidate.lowercased())
-            let url = outputFolder.appendingPathComponent("\(candidate).json")
+            let url = outputFolder.appendingPathComponent("\(candidate).spice-result.json")
             try encoder.encode(result).write(to: url, options: .atomic)
         }
     }

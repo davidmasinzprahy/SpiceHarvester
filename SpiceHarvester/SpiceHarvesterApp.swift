@@ -80,6 +80,9 @@ struct SpiceHarvesterApp: App {
         WindowGroup(id: "main") {
             ContentView(vm: vm)
                 .focusedSceneValue(\.focusedViewModel, vm)
+                .onAppear {
+                    appDelegate.primaryViewModel = vm
+                }
         }
         // `.defaultSize` is the SwiftUI fallback for first-launch dimensions; the
         // AppDelegate below then adapts the actual launch frame to the current screen.
@@ -142,6 +145,12 @@ struct SpiceHarvesterApp: App {
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(targetVM.isRunning || !targetVM.canSaveProject)
 
+                Button("Otevřít výsledek...") {
+                    _ = targetVM.openSpiceResultFile()
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(targetVM.isRunning || targetVM.loadedResult != nil)
+
                 Button("Otevřít výstup ve Finderu") {
                     targetVM.openOutput()
                 }
@@ -161,7 +170,7 @@ struct SpiceHarvesterApp: App {
                     Task { await targetVM.runAll() }
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(!targetVM.canRunAll || targetVM.isRunning)
+                .disabled(!targetVM.canRunAll || targetVM.isRunning || targetVM.loadedResult != nil)
 
                 Button("Přerušit") {
                     targetVM.cancelRun()
@@ -175,13 +184,13 @@ struct SpiceHarvesterApp: App {
                     Task { await targetVM.runPreprocessing() }
                 }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
-                .disabled(!targetVM.canRunPreprocessing || targetVM.isRunning)
+                .disabled(!targetVM.canRunPreprocessing || targetVM.isRunning || targetVM.loadedResult != nil)
 
                 Button("Extrakce") {
                     Task { await targetVM.runExtraction() }
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(!targetVM.canRunExtraction || targetVM.isRunning)
+                .disabled(!targetVM.canRunExtraction || targetVM.isRunning || targetVM.loadedResult != nil)
 
                 Divider()
 
@@ -196,13 +205,13 @@ struct SpiceHarvesterApp: App {
                 // shortcut is bound globally by SwiftUI commands.
                 Button("Režim FAST") { targetVM.config.extractionMode = .fast }
                     .keyboardShortcut("1", modifiers: .command)
-                    .disabled(focusedVM == nil || targetVM.isRunning)
+                    .disabled(focusedVM == nil || targetVM.isRunning || targetVM.loadedResult != nil)
                 Button("Režim SEARCH") { targetVM.config.extractionMode = .search }
                     .keyboardShortcut("2", modifiers: .command)
-                    .disabled(focusedVM == nil || targetVM.isRunning)
+                    .disabled(focusedVM == nil || targetVM.isRunning || targetVM.loadedResult != nil)
                 Button("Režim CONSOLIDATE") { targetVM.config.extractionMode = .consolidate }
                     .keyboardShortcut("3", modifiers: .command)
-                    .disabled(focusedVM == nil || targetVM.isRunning)
+                    .disabled(focusedVM == nil || targetVM.isRunning || targetVM.loadedResult != nil)
 
                 Divider()
 
@@ -336,6 +345,10 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
     /// under `NSWindow Frame {key}`), `setFrameUsingName` restores it on
     /// future launches — so the user's manual resize / move sticks.
     private let mainWindowAutosaveName = "SpiceHarvesterMainWindow"
+    /// Pointer to the primary window's view-model, set once in
+    /// `applicationDidFinishLaunching` so delegate methods like
+    /// `application(_:openURLs:)` can access it.
+    weak var primaryViewModel: SHAppViewModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Become the notification delegate so we can respond to action
@@ -461,5 +474,32 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
         // Save the first-launch frame immediately so a quick quit-relaunch
         // doesn't lose it (autosave is normally written on resize / close).
         window.saveFrame(usingName: mainWindowAutosaveName)
+    }
+
+    // MARK: – Open .spice-result.json from Finder (CFBundleDocumentTypes)
+
+    /// Called when the user opens a registered document type from Finder
+    /// (double-click, "Open With"). Routes each URL to the primary view
+    /// model so the loaded result appears in the UI.
+    ///
+    /// This fires regardless of which window (if any) is in front. The
+    /// result is pushed into `vm.loadedResult` so it appears in the
+    /// primary window's notification bar even if a scratch window was
+    /// focused at the time of the open.
+    func application(_ application: NSApplication, open: [URL]) {
+        guard let url = open.first, !url.pathExtension.isEmpty else { return }
+        // Only handle our own UTI — ignore unrelated drops.
+        guard url.pathExtension == "spice-result.json" else { return }
+        guard let vm = primaryViewModel else {
+            // App is still launching — show an alert so the user knows
+            // the open failed rather than silently dropping the file.
+            let alert = NSAlert()
+            alert.messageText = "Spice Harvester ještě nebyl spuštěn"
+            alert.informativeText = "Počkejte na hlavní okno a zkuste otevřít soubor znovu."
+            alert.alertStyle = .informational
+            alert.runModal()
+            return
+        }
+        _ = vm.openSpiceResultFile(url)
     }
 }

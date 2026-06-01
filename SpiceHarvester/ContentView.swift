@@ -572,10 +572,16 @@ struct ContentView: View {
     /// full vertical room.
     @ViewBuilder
     private var notificationStack: some View {
-        if vm.lastCompletion != nil || !vm.displayedConflicts.isEmpty {
+        let hasNotification = vm.lastCompletion != nil
+            || !vm.displayedConflicts.isEmpty
+            || vm.loadedResult != nil
+        if hasNotification {
             VStack(alignment: .leading, spacing: 8) {
                 if let completion = vm.lastCompletion {
                     completionBanner(completion)
+                }
+                if let loaded = vm.loadedResult {
+                    loadedResultBanner(loaded)
                 }
                 // `displayedConflicts` is debounced — see `scheduleConflictUpdate`.
                 // Direct read of `parameterConflicts` flickered as the analyzer
@@ -1571,6 +1577,49 @@ struct ContentView: View {
         // button as separate stops.
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isStaticText)
+    }
+
+    /// Banner shown when a `.spice-result.json` file is loaded.
+    /// Displays key patient info and a dismiss button.
+    @ViewBuilder
+    private func loadedResultBanner(_ result: SHExtractionResult) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.badge.checkmark")
+                    .foregroundStyle(.blue)
+                Text("Načteno z \(result.source_file)")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Zavřít") {
+                    vm.loadedResult = nil
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+            }
+            if !result.patient_name.isEmpty {
+                Text("Pacient: \(result.patient_name)")
+                    .font(.caption)
+            }
+            if !result.patient_id.isEmpty {
+                Text("ID: \(result.patient_id)")
+                    .font(.caption)
+            }
+            if !result.diagnoses.isEmpty {
+                Text("Diagnózy: \(result.diagnoses.joined(separator: ", "))")
+                    .font(.caption)
+            }
+            Text("Confidence: \(String(format: "%.2f", result.confidence))")
+                .font(.caption)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.blue.opacity(0.35), lineWidth: 0.5)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Načtený výsledek: \(result.patient_name)")
     }
 
     // MARK: – Progress

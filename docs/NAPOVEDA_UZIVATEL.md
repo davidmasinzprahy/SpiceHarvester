@@ -69,6 +69,7 @@ Cleanup je automatický — když první běh skončí (success/cancel/fail), dr
 | Uložit projekt jako… | **Cmd+Shift+S** |
 | Nové okno (scratch) | **Cmd+Shift+N** |
 | Otevřít výstup ve Finderu | **Cmd+Shift+O** |
+| Otevřít výsledek… | **Cmd+Shift+R** |
 
 ### Editor a navigace
 | Akce | Zkratka |
@@ -95,6 +96,7 @@ Aplikace přidává custom top-level menu **Pipeline** mezi standardní macOS me
 - **Otevřít projekt…** — Cmd+O
 - **Otevřít nedávné** › last 8 projektů + Vyčistit seznam
 - **Uložit projekt jako…** — Cmd+Shift+S
+- **Otevřít výsledek…** — Cmd+Shift+R (načte `.spice-result.json` exportovaný přes Export → JSON; pipeline tlačítka jsou během zobrazení výsledku disabled)
 - **Otevřít výstup ve Finderu** — Cmd+Shift+O
 
 ### Pipeline *(custom)*
@@ -222,6 +224,7 @@ Aplikace se při spuštění jobu probudí na popředí (`openAppWhenRun: true`)
 - **Extrakce (Cmd+Shift+E)** — spustí pouze FÁZI 2 (LLM extrakce nad cache); automaticky doplní předzpracování, pokud ještě nejsou data.
 
 ### Runtime sloupec
+- **Načtený výsledek (importovaný banner)** — po otevření `.spice-result.json` (Cmd+Shift+R nebo double-click z Finderu) se zobrazí banner s pacient info (jméno, ID, diagnózy, medication, confidence). Pipeline tlačítka jsou disabled; klik na **Zavřít** vrátí UI do normálního stavu.
 - **Hotovo / Přerušeno / Selhalo (completion banner)** — po dokončení runu se objeví nahoře v pravém sloupci. Klik na **Potvrdit** banner skryje a vrátí UI do připraveného stavu. Po **úspěšném** runu je banner také **drag source** — přetáhni ho do Finderu / Slacku → output folder se předá. Mimo app pak app pošle **Notification Center banner** s tlačítkem „Otevřít výstup".
 - **Předchozí běh** v idle Průběh — po dokončeném runu zobrazí `⌀ X s/dok · Vstup: N · Odhad: ≈ T` (před spuštěním dalšího runu).
 - **Live throughput** v aktivní Průběh — `12,3 dok/min · ⌀ 4,8 s/dok` vedle ETA — užitečné pro detekci zpomalení (KV cache, swap).
@@ -340,7 +343,7 @@ Do výstupní složky se ukládá:
 
 **Kanonický formát** (pokud LLM odpověď odpovídá `SHExtractionResult` schema):
 - `results.json` — agregát
-- per-soubor `{name}.json` (deduplikace `{name}_2`, `{name}_3` při kolizi)
+- per-soubor `{name}.spice-result.json` (deduplikace `{name}_2.spice-result.json`, `{name}_3.spice-result.json` při kolizi) — tyto soubory lze znovu otevřít v aplikaci přes **Otevřít výsledek…** (Cmd+Shift+R) nebo double-click z Finderu
 - `results.txt` — human readable + sekce `--- Raw odpověď modelu ---`
 - `results.csv` — 1 řádek na dokument, **UTF-8 BOM** pro Excel, LF oddělovače
 

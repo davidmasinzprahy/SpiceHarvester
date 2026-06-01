@@ -12,7 +12,7 @@ Aplikace je rozdělená do vrstev:
 - `Pipeline` – dvoufázové dávkové zpracování + queue management
 - `Cache` – JSON cache dokumentů + content-addressable inference cache
 - `Logging` – průběžný log do `processing.log`
-- `Export` – JSON/TXT/CSV/raw export + rozhraní pro XLSX
+- `Export` – JSON/TXT/CSV/raw export + import `.spice-result.json` + rozhraní pro XLSX
 - `Models` – datové modely (`Codable`, `Sendable`)
 
 ## 2. Dvoufázová pipeline
@@ -264,7 +264,7 @@ Po úspěšném runu se `avgPerDocumentMs` a `avgPerPageMs` persistují do `conf
 
 **Kanonický tvar** (`SHExtractionResult` schema):
 - `results.json` — pole všech výsledků
-- per-file `*.json` (s deduplikací názvů přes `{name}_2`, `{name}_3`, …)
+- per-file `*.spice-result.json` (s deduplikací názvů přes `{name}_2.spice-result.json`, `{name}_3.spice-result.json`, …) — rozlišuje se podle UTI `DavidMasin.SpiceHarvester.result` deklarované v `Info.plist` (QuickLook náhled, Finder file association)
 - `results.txt` — human readable + sekce `--- Raw odpověď modelu ---`
 - `results.csv` — 1 řádek na dokument, UTF-8 **BOM** pro Excel na macOS, LF line endings (CRLF rozbíjelo Swift `split(separator: "\n")` kvůli grapheme clusterům)
 
@@ -274,7 +274,13 @@ Po úspěšném runu se `avgPerDocumentMs` a `avgPerPageMs` persistují do `conf
 - Jinak plain text → `{name}_raw.txt`
 - Agregát: `raw_responses.json` mapa `{fileName: parsedOrRaw}` pro batch consumery
 
-Sdílený `SHJSON.encoder()` / `.decoder()` factory pro konzistenci.
+Sdílený `SHJSON.encoder()` / `.decoder()` factory pro konzistencí výstupu i vstupu.
+
+**Import `.spice-result.json`** (načtení exportovaných výsledků zpět do aplikace):
+- Menu "Otevřít výsledek…" (Cmd+Shift+R) — `NSOpenPanel` filtrující `.json` soubory (zpráva odkazující na `.spice-result.json`)
+- `SHAppViewModel.openSpiceResultFile(url:)` — načte soubor (`Data(contentsOf:)`), dekóduje přes `SHJSON.decoder().decode(SHExtractionResult.self, from:)`, nastaví `loadedResult` a `statusText` ("Načteno: <jméno> (<soubor>)")
+- `application(_:open:)` na `SHAppDelegate` — handler pro Finder double-click / drag-on-icon při spuštění appky (bridging přes `weak primaryViewModel`)
+- UI: pipeline tlačítka jsou disabled (`loadedResult != nil`), v notificationStack se zobrazí banner s patient info a "Zavřít" tlačítkem, které `loadedResult` resetuje na `nil`
 
 XLSX rozhraní `SHXLSXExporting` (`SHXLSXExportPlaceholder`) — nerealizováno; CSV s BOM pokrývá Excel use case.
 
@@ -293,10 +299,12 @@ Aplikace registruje **4 Scene**:
 - `applicationDidFinishLaunching`: nastaví `UNUserNotificationCenter.delegate = self`, registruje completion notification category s "Otevřít výstup" akcí, volá `requestAuthorization`. Frame autosave přes `setFrameAutosaveName("SpiceHarvesterMainWindow")` — manuální resize/move se persistuje, první launch padne na `resizeMainWindowForCurrentScreen()` (visibleFrame logika).
 - `UNUserNotificationCenterDelegate`: `willPresent` vrací `[.banner, .sound]` (banner i pro foreground), `didReceive` mapuje `OPEN_OUTPUT` action na `SHIntentNotifications.openOutput` post.
 - `handleOpenProjectOutcome(_:)` static helper renderuje alert pro `successNeedsRepick` / `failed` cases.
+- `primaryViewModel: weak SHAppViewModel?` — bridge property nastavená z `ContentView` `.onAppear` na `WindowGroup`, umožňuje `application(_:open:)` přístup view modelu i když delegate je vytvořen dříve než SwiftUI scéna.
+- `application(_:open:)` — handler pro Finder double-click / drag-on `.spice-result.json` soubory. Pokusí se `primaryViewModel.openSpiceResultFile(url)`. Pokud je `primaryViewModel` nil (app ještě nenaběhla), zobrazí `NSAlert` místo silent drop.
 
 `.commands` registruje:
 1. `CommandGroup(replacing: .newItem)` — Nové okno (Cmd+Shift+N) / Otevřít projekt… (Cmd+O) / "Otevřít nedávné" submenu
-2. `CommandGroup(after: .saveItem)` — Uložit projekt jako… (Cmd+Shift+S) / Otevřít výstup ve Finderu (Cmd+Shift+O)
+2. `CommandGroup(after: .saveItem)` — Uložit projekt jako… (Cmd+Shift+S) / Otevřít výsledek… (Cmd+Shift+R) / Otevřít výstup ve Finderu (Cmd+Shift+O)
 3. `CommandMenu("Pipeline")` — Spustit (Cmd+R) / Přerušit (Cmd+.) / Předzpracování (Cmd+Shift+P) / Extrakce (Cmd+Shift+E) / Režim FAST / SEARCH / CONSOLIDATE (Cmd+1 / Cmd+2 / Cmd+3) / "Znovu ověřit zdraví serveru"
 4. `CommandGroup(replacing: .help)` — Nápověda (Cmd+?), volá `openWindow(id: "help")`
 
@@ -424,6 +432,13 @@ var isVerifiedServerReachable: Bool = true
 - `saveProjectAs() -> URL?` — NSSavePanel, JSON encode, atomic write.
 - `openProject() -> SHOpenProjectOutcome` — NSOpenPanel, sniff `schemaVersion` před decode (friendly error pro non-project JSON), `staleSandboxPaths(in:)` detekce + `successNeedsRepick` outcome.
 - Reset state: `lastCompletion = nil`, `progressState = .init()`, `cachedDocuments.removeAll()`, `dismissedConflictIDs.removeAll()`.
+
+#### Open Spice Result (import exportovaných výsledků)
+- `loadedResult: SHExtractionResult?` — nil = normální pipeline režim; nenil = zobrazený načtený výsledek, pipeline tlačítka disabled (Run, Stop, mode switches, all 7 pipeline actions check `loadedResult != nil`).
+- `openSpiceResultFile() -> SHOpenSpiceResultOutcome` — `NSOpenPanel` (filtrace `.json`, title "Otevřít výsledek…", zpráva odkazující na `.spice-result.json`).
+- `openSpiceResultFile(_ url: URL) -> SHOpenSpiceResultOutcome` — `startAccessingSecurityScopedResource()`, `Data(contentsOf:)`, `SHJSON.decoder().decode(SHExtractionResult.self, from:)`, nastavení `loadedResult` + `statusText` ("Načteno: <patient_name> (<source_file>)"). Na failure: `loadedResult = nil`, error do statusText.
+- `SHOpenSpiceResultOutcome` enum: `.success(url:)` / `.failed(error:)` / `.cancelled` (podle vzoru `SHOpenProjectOutcome`).
+- `SHExportService.exportJSON` pojmenovává per-file výstupy jako `*.spice-result.json` (řádek 155 v `SHExportService.swift`) tak, aby se soubory shodovaly s UTI `DavidMasin.SpiceHarvester.result` z `Info.plist`.
 
 #### AppIntents bridge (Shortcuts.app jako job)
 
