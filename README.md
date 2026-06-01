@@ -1,84 +1,98 @@
-# SpiceHarvester
+# Spice Harvester
 
-[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-lightgrey?logo=apple)](https://www.apple.com/macos)
-[![Swift 5.10+](https://img.shields.io/badge/Swift-5.10%2B-orange?logo=swift)](https://swift.org)
+[![macOS 15.6+](https://img.shields.io/badge/macOS-15.6%2B-lightgrey?logo=apple)](https://www.apple.com/macos)
+[![Swift](https://img.shields.io/badge/Swift-5-orange?logo=swift)](https://swift.org)
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)](https://developer.apple.com/xcode/swiftui/)
 [![Architecture](https://img.shields.io/badge/architecture-MVVM-success)](#)
 
-Nativní macOS desktopová aplikace, která dávkově projde složku s PDF dokumenty, vytěží z nich data podle vašeho promptu a vyexportuje výsledky do JSON, TXT nebo CSV. Veškerá inference běží na lokálním OpenAI-kompatibilním serveru (LM Studio nebo MLX). Žádný cloud, žádná telemetrie, data neopouští počítač uživatele.
+Nativní macOS aplikace pro dávkovou extrakci strukturovaných dat z PDF dokumentů pomocí lokálního AI modelu.
 
-> Data zůstávají lokálně. Žádný cloud, žádný telemetry.
+Spice Harvester projde složku s PDF soubory, vytěží z nich text, podle zadaného promptu zavolá lokální OpenAI-kompatibilní server a uloží výsledky do JSON, CSV a TXT. Data zůstávají na počítači uživatele: aplikace nepoužívá cloudovou službu ani telemetrii.
 
-Pipeline je dvoufázová:
+## K čemu slouží
 
-1. **Předzpracování + cache** — scan / hash / PDFKit / OCR / clean → JSON cache
-2. **Extrakce** — OpenAI-compatible API (`/chat/completions`) na libovolném backendu (LM Studio, oMLX, nebo jiný server v LAN), uživatelem definovaný prompt a schéma výstupu
+- dávkové zpracování PDF dokumentů
+- extrakce dat podle vlastního promptu
+- práce s lokálními modely přes LM Studio, MLX nebo jiný OpenAI-kompatibilní backend
+- opakované běhy nad stejnými dokumenty díky cache
+- export výsledků pro další zpracování v Excelu, Numbers, databázích nebo skriptech
 
-Výchozí režim je **FAST** (bez embeddingů).
+## Jak funguje pipeline
 
-## Obsah
+Zpracování má dvě fáze:
 
-- [Rychlý start](#rychlý-start)
-- [Klíčové funkce](#klíčové-funkce)
-- [Výstupní formát](#výstupní-formát)
-- [Bezpečnost](#bezpečnost)
-- [Dokumentace](#dokumentace)
+1. **Předzpracování**  
+   Aplikace najde PDF soubory, spočítá jejich hash, vytěží text přes PDFKit nebo OCR a uloží vyčištěný text do cache.
+
+2. **Extrakce**  
+   Lokální AI model dostane vybraný kontext dokumentu a uživatelský prompt. Odpověď se uloží v původní podobě i v aplikačním výsledkovém formátu.
+
+## Režimy extrakce
+
+| Režim | Použití |
+|---|---|
+| **FAST** | Jeden požadavek na dokument, bez embeddingů. Vhodné pro rychlé per-dokumentové extrakce. |
+| **SEARCH** | Výběr relevantních částí dokumentu pomocí embeddingů. Vhodné pro delší dokumenty a cílené otázky. |
+| **CONSOLIDATE** | Jeden agregovaný výstup nad celou dávkou. Vhodné pro souhrnné tabulky nebo deduplikaci napříč dokumenty. |
+
+Výchozí režim aplikace je **SEARCH**.
+
+## Požadavky
+
+- macOS 15.6+
+- Xcode 16+
+- lokální OpenAI-kompatibilní server, například:
+  - LM Studio: `http://localhost:1234/v1`
+  - MLX server: `http://localhost:8000/v1`
+  - Ollama, vLLM, llama.cpp nebo LocalAI s kompatibilním API
 
 ## Rychlý start
 
-### Předpoklady
+1. Spusť lokální AI server a načti model.
+2. Otevři `SpiceHarvester.xcodeproj` v Xcode.
+3. Spusť schéma `SpiceHarvester`.
+4. V aplikaci nastav vstupní, výstupní a cache složku.
+5. Ověř server a vyber model.
+6. Zadej prompt nebo načti prompt ze souboru.
+7. Spusť pipeline tlačítkem **Spustit** nebo zkratkou `Cmd+R`.
 
-- macOS 14+ (Sonoma), Xcode 16+
-- Spuštěný lokální OpenAI-kompatibilní server:
-  - **LM Studio** — typicky `http://localhost:1234/v1` (auto-detekce kontextu)
-  - **MLX server** — typicky `http://localhost:8000/v1` (kontext nastav ručně)
-  - Libovolný OpenAI-kompatibilní server (Ollama, vLLM, llama.cpp, LocalAI)
+Podrobný návod je v [uživatelské nápovědě](docs/NAPOVEDA_UZIVATEL.md).
 
-### Spuštění
+## Výstupy
 
-1. Otevři `SpiceHarvester.xcodeproj` v Xcode, spusť schéma `SpiceHarvester` (`Cmd+R`).
-2. V levém sloupci nastav: složky (vstupní / výstupní / cache), server a model, prompt.
-3. Stiskni **Spustit** v horní liště (`Cmd+R`).
+Aplikace zapisuje do výstupní složky:
 
-Plný návod: [docs/NAPOVEDA_UZIVATEL.md](docs/NAPOVEDA_UZIVATEL.md).
+- `results.json` - kompletní výsledky dávky
+- `results.csv` - tabulkový export s UTF-8 BOM pro Excel/Numbers
+- `results.txt` - čitelný textový souhrn
+- `*.spice-result.json` - samostatný výsledek pro každý dokument
+- `raw_responses.*` - původní odpovědi modelu, pokud jsou dostupné
 
-## Klíčové funkce
+Tvar odpovědi určuje uživatelský prompt. Aplikace se pokusí výsledek převést do vlastního schématu, ale původní odpověď modelu vždy zachová.
 
-- Tři režimy: **FAST** / **SEARCH** (RAG s embeddingy) / **CONSOLIDATE** (s map-reduce fallbackem)
-- Dvoustupňová cache (per-dokument + per-inference) — instant hit při ladění promptu
-- Pre-flight token budget check + auto-detekce context length z LM Studio API
-- Multi-window: primary + scratch (Cmd+Shift+N) s nezávislým view-modelem; Save/Open Project (`Cmd+Shift+S` / `Cmd+O`)
-- Clipping: Shortcuts.app integrace (plnohodnotné joby s parametry), Notification Center, Notification Center na completion (success/cancelled/failed)
-- Import: **Otevřít výsledek…** (`Cmd+Shift+R`) nebo double-click `.spice-result.json` z Finderu — pipeline je během zobrazení disabled
-- Lokalizace (CS + EN), Dynamic Type clamp, Reduce Motion / VoiceAware
+## Soukromí a bezpečnost
 
-> Podrobné klávesové zkratky: [docs/KLÁVESOVÉ_ZKRATKY.md](docs/KLÁVESOVÉ_ZKRATKY.md)
-> Podrobný výkon a cache: [docs/VYKON_A_CACHE.md](docs/VYKON_A_CACHE.md)
+Spice Harvester je navržený pro lokální zpracování citlivých dokumentů.
 
-## Výstupní formát
+- inference běží proti serveru zadanému uživatelem
+- aplikace neposílá dokumenty do cloudu
+- aplikace neobsahuje telemetrii
+- notifikace neobsahují názvy souborů ani citlivé detaily
+- App Sandbox je zapnutý
 
-Uživatelský prompt je **jediná autorita nad tvarem odpovědi**. Pipeline se pokusí dekódovat odpověď proti kanonickému schématu (`SHExtractionResult`), ale **rawResponse je vždy zachován**. Custom schémata jsou plnohodnotná: prompt si je definuje sám.
-
-Per-dokument soubory `{name}.spice-result.json` (UTI registrace `DavidMasin.SpiceHarvester.result` v `Info.plist`) — rozlišuje je Finder (✅ QuickLook preview) a lze je znovu otevřít v aplikaci přes **Otevřít výsledek…** (`Cmd+Shift+R`) nebo double-clickem z Finderu.
-
-## Bezpečnost
-
-- **App Sandbox** zapnutý. **`NSAllowsLocalNetworking`** v Info.plist — HTTP komunikace na lokálním serveru.
-- API klíče jsou aktuálně plaintext v UserDefaults (migrace na Keychain v [P2_BACKLOG_DEFERRED.md](docs/P2_BACKLOG_DEFERRED.md)).
-- Notifikační bannery obsahují pouze generický text — žádné filename, error detail nebo PHI.
+Pozor: API klíče jsou zatím uložené v UserDefaults jako plaintext. Migrace do Keychainu je vedená v backlogu.
 
 ## Dokumentace
 
 | Dokument | Obsah |
 |---|---|
-| [Uživatelská nápověda](docs/NAPOVEDA_UZIVATEL.md) | Kompletní návod k použití |
-| [Technická dokumentace](docs/KODOVA_DOKUMENTACE.md) | Architektura, pipeline, persistence, cache |
-| [Architektura (PlantUML)](docs/ARCHITEKTURA_PLANTUML.md) | Blokové diagramy |
-| [Klávesové zkratky](docs/KLÁVESOVÉ_ZKRATKY.md) | Rychlé příkazy a menu bar layout |
-| [Výkon a cache](docs/VYKON_A_CACHE.md) | Inference cache, ladění concurrency |
-| [UI design](docs/UI_DESIGN.md) | Komponenty, ikony, layout |
-| [Práce s prompty](docs/PROMPT_TXT_NAVOD.md) | Šablony a CSV/TXT konvence |
-| [Terminologie](docs/TERMINOLOGIE.md) | Kanonické pojmy |
-| [P2 backlog](docs/P2_BACKLOG_DEFERRED.md) | Odložené funkce s implementačními poznámkami |
+| [Uživatelská nápověda](docs/NAPOVEDA_UZIVATEL.md) | Použití aplikace krok za krokem |
+| [Technická dokumentace](docs/KODOVA_DOKUMENTACE.md) | Architektura, pipeline, cache, persistence |
+| [Výkon a cache](docs/VYKON_A_CACHE.md) | Nastavení výkonu a chování cache |
+| [Klávesové zkratky](docs/KLÁVESOVÉ_ZKRATKY.md) | Přehled zkratek |
+| [Práce s prompty](docs/PROMPT_TXT_NAVOD.md) | Doporučený formát promptů |
+| [Terminologie](docs/TERMINOLOGIE.md) | Jednotné názvosloví projektu |
 
-**Autor:** [David Mašín](https://github.com/davidmasinzprahy)
+## Autor
+
+[David Mašín](https://github.com/davidmasinzprahy)
