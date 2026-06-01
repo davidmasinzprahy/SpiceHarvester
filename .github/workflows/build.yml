@@ -15,6 +15,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Contributor hygiene
+        run: python3 scripts/check_contributor_hygiene.py
+
+      - name: Czech quote lint
+        run: python3 scripts/check_czech_quotes.py
 
       - name: Build (Release)
         run: |

@@ -39,7 +39,7 @@ final class SHPreprocessingPipeline {
         onItemEvent: @escaping @Sendable (SHExtractionItemEvent) async -> Void = { _ in }
     ) async -> Output {
         let scanStart = Date()
-        let files = scanner.recursivePDFs(in: inputFolder)
+        let files = scanner.recursiveDocuments(in: inputFolder)
         var counters = SHPipelineCounters(foundPDFs: files.count)
         await onCounters(counters)
         await benchmark.addScan(durationMs: Date().timeIntervalSince(scanStart) * 1000.0, docs: files.count)
@@ -54,7 +54,7 @@ final class SHPreprocessingPipeline {
                         return try await self.queue.run { () -> SHCachedDocument? in
                             // Emit "started" only after the worker semaphore lets
                             // the file through, otherwise the UI would show all
-                            // queued PDFs as "currently processing" at once.
+                            // queued documents as "currently processing" at once.
                             await onItemEvent(.started(name: name))
                             do {
                                 let result = try await self.processOne(fileURL: file)
@@ -113,7 +113,7 @@ final class SHPreprocessingPipeline {
         await logger.log(file: fileURL.lastPathComponent, phase: "CACHE", message: "miss")
 
         let parseStart = Date()
-        let parsed = parser.parse(fileURL)
+        let parsed = parseText(from: fileURL)
         await benchmark.addTextExtraction(durationMs: Date().timeIntervalSince(parseStart) * 1000.0, pages: parsed.pageCount)
 
         let rawPages: [String]
@@ -164,5 +164,20 @@ final class SHPreprocessingPipeline {
         hasher.update(data: Data([0x00]))
         hasher.update(data: Data(signature.utf8))
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func parseText(from fileURL: URL) -> SHPDFParseResult {
+        if fileURL.pathExtension.lowercased() == "pdf" {
+            return parser.parse(fileURL)
+        }
+
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return SHPDFParseResult(rawPages: [], hasTextLayer: false, pageCount: 0)
+        }
+        return SHPDFParseResult(
+            rawPages: [text],
+            hasTextLayer: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            pageCount: 1
+        )
     }
 }

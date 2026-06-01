@@ -2,7 +2,18 @@ import Foundation
 import CryptoKit
 
 struct SHFileScanService {
-    func recursivePDFs(in root: URL) -> [URL] {
+    static let supportedDocumentExtensions: Set<String> = [
+        "pdf",
+        "txt",
+        "text",
+        "md",
+        "markdown",
+        "csv",
+        "tsv",
+        "json"
+    ]
+
+    func recursiveDocuments(in root: URL) -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -13,11 +24,20 @@ struct SHFileScanService {
 
         var items: [URL] = []
         for case let url as URL in enumerator {
-            if url.pathExtension.lowercased() == "pdf" {
-                items.append(url)
+            guard Self.supportedDocumentExtensions.contains(url.pathExtension.lowercased()) else {
+                continue
             }
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+            if values?.isRegularFile == false {
+                continue
+            }
+            items.append(url)
         }
         return items.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    func recursivePDFs(in root: URL) -> [URL] {
+        recursiveDocuments(in: root).filter { $0.pathExtension.lowercased() == "pdf" }
     }
 
     func sha256(of fileURL: URL) throws -> String {

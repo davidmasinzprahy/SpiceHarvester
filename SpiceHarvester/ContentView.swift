@@ -849,7 +849,7 @@ struct ContentView: View {
         }
     }
 
-    /// Quick chip under the Vstup row showing the recursive PDF count + total
+    /// Quick chip under the Vstup row showing the recursive document count + total
     /// size. Aligned under the path display (130 pt label width + 8 pt label
     /// gap), so it visually attaches to the path it describes. Hidden when no
     /// scan has run yet — the view's `.onChange(of: inputFolder)` triggers a
@@ -873,7 +873,7 @@ struct ContentView: View {
             .background(tint.opacity(0.10), in: Capsule())
             .overlay(Capsule().strokeBorder(tint.opacity(0.30), lineWidth: 0.5))
             .help(isEmpty
-                  ? "Ve vstupní složce nejsou žádné PDF — vyber jinou složku nebo do této přidej PDF."
+                  ? "Ve vstupní složce nejsou žádné podporované dokumenty — vyber jinou složku nebo do této přidej PDF, TXT, Markdown, CSV, TSV nebo JSON."
                   : "Recursivní scan vstupní složky.")
             Spacer()
         }

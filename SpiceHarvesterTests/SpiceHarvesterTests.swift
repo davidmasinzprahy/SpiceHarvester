@@ -110,6 +110,149 @@ struct SpiceHarvesterTests {
         #expect(await cache.count() == 0)
     }
 
+    @Test func inferenceCacheKeyInvalidatesOnSemanticInputs() {
+        let base = SHInferenceCache.makeKey(
+            systemPrompt: "system",
+            prompt: "prompt",
+            cleanerVersion: "cleaner-v1",
+            documentHashes: ["b", "a"],
+            model: "model-a",
+            embeddingModel: "",
+            rerankerModel: "",
+            modeTag: "fast"
+        )
+
+        let sameWithDifferentDocumentOrder = SHInferenceCache.makeKey(
+            systemPrompt: "system",
+            prompt: "prompt",
+            cleanerVersion: "cleaner-v1",
+            documentHashes: ["a", "b"],
+            model: "model-a",
+            embeddingModel: "",
+            rerankerModel: "",
+            modeTag: "fast"
+        )
+        #expect(base == sameWithDifferentDocumentOrder)
+
+        let changedPrompt = SHInferenceCache.makeKey(
+            systemPrompt: "system",
+            prompt: "prompt changed",
+            cleanerVersion: "cleaner-v1",
+            documentHashes: ["a", "b"],
+            model: "model-a",
+            embeddingModel: "",
+            rerankerModel: "",
+            modeTag: "fast"
+        )
+        let changedModel = SHInferenceCache.makeKey(
+            systemPrompt: "system",
+            prompt: "prompt",
+            cleanerVersion: "cleaner-v1",
+            documentHashes: ["a", "b"],
+            model: "model-b",
+            embeddingModel: "",
+            rerankerModel: "",
+            modeTag: "fast"
+        )
+        let changedMode = SHInferenceCache.makeKey(
+            systemPrompt: "system",
+            prompt: "prompt",
+            cleanerVersion: "cleaner-v1",
+            documentHashes: ["a", "b"],
+            model: "model-a",
+            embeddingModel: "",
+            rerankerModel: "",
+            modeTag: "search"
+        )
+        let changedCleaner = SHInferenceCache.makeKey(
+            systemPrompt: "system",
+            prompt: "prompt",
+            cleanerVersion: "cleaner-v2",
+            documentHashes: ["a", "b"],
+            model: "model-a",
+            embeddingModel: "",
+            rerankerModel: "",
+            modeTag: "fast"
+        )
+        let changedDocument = SHInferenceCache.makeKey(
+            systemPrompt: "system",
+            prompt: "prompt",
+            cleanerVersion: "cleaner-v1",
+            documentHashes: ["a", "c"],
+            model: "model-a",
+            embeddingModel: "",
+            rerankerModel: "",
+            modeTag: "fast"
+        )
+
+        #expect(base != changedPrompt)
+        #expect(base != changedModel)
+        #expect(base != changedMode)
+        #expect(base != changedCleaner)
+        #expect(base != changedDocument)
+    }
+
+    @Test func fileScannerFindsSupportedDocumentsAndSkipsHiddenOrUnsupportedFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("spice-scan-test-\(UUID().uuidString)")
+        let nested = root.appendingPathComponent("nested")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let supported = [
+            root.appendingPathComponent("a.pdf"),
+            root.appendingPathComponent("b.txt"),
+            nested.appendingPathComponent("c.md"),
+            nested.appendingPathComponent("d.csv"),
+            nested.appendingPathComponent("e.json")
+        ]
+        for url in supported {
+            try "test".write(to: url, atomically: true, encoding: .utf8)
+        }
+        try "ignore".write(to: root.appendingPathComponent("image.png"), atomically: true, encoding: .utf8)
+        try "hidden".write(to: root.appendingPathComponent(".hidden.txt"), atomically: true, encoding: .utf8)
+
+        let scanner = SHFileScanService()
+        let documents = scanner.recursiveDocuments(in: root).map(\.lastPathComponent)
+        let pdfs = scanner.recursivePDFs(in: root).map(\.lastPathComponent)
+
+        #expect(documents == ["a.pdf", "b.txt", "c.md", "d.csv", "e.json"])
+        #expect(pdfs == ["a.pdf"])
+    }
+
+    @Test func preprocessingPipelineReadsPlainTextDocumentsWithoutOCR() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("spice-preprocess-test-\(UUID().uuidString)")
+        let cacheRoot = FileManager.default.temporaryDirectory.appendingPathComponent("spice-preprocess-cache-\(UUID().uuidString)")
+        let logRoot = FileManager.default.temporaryDirectory.appendingPathComponent("spice-preprocess-log-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: logRoot, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: cacheRoot)
+            try? FileManager.default.removeItem(at: logRoot)
+        }
+
+        let textURL = root.appendingPathComponent("report.txt")
+        try "Pacient: Jan Novak\nCRP: 4 mg/l\n".write(to: textURL, atomically: true, encoding: .utf8)
+
+        let pipeline = SHPreprocessingPipeline(
+            ocrProvider: NoopOCRProvider(),
+            cacheManager: SHCacheManager(cacheRoot: cacheRoot),
+            logger: SHProcessingLogger(logFileURL: logRoot.appendingPathComponent("processing.log")),
+            benchmark: SHBenchmarkService(),
+            maxConcurrentWorkers: 1
+        )
+
+        let output = await pipeline.run(inputFolder: root, onCounters: { _ in })
+
+        #expect(output.cachedDocuments.count == 1)
+        let doc = try #require(output.cachedDocuments.first)
+        #expect(URL(fileURLWithPath: doc.sourceFile).standardizedFileURL.path == textURL.standardizedFileURL.path)
+        #expect(doc.cleanedText.contains("Pacient: Jan Novak"))
+        #expect(doc.metadata.pageCount == 1)
+        #expect(doc.metadata.usedOCR == false)
+        #expect(doc.metadata.hasTextLayer == true)
+    }
+
     @Test func csvExportCreatesOneRowPerDocument() throws {
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("spice-export-test-\(UUID().uuidString)")
         let exporter = SHExportService()
@@ -148,10 +291,97 @@ struct SpiceHarvesterTests {
         try exporter.exportAll(results: results, outputFolder: out)
 
         let csvURL = out.appendingPathComponent("results.csv")
+        let data = try Data(contentsOf: csvURL)
+        #expect(data.starts(with: Data([0xEF, 0xBB, 0xBF])))
         let csv = try String(contentsOf: csvURL, encoding: .utf8)
         let lines = csv.split(separator: "\n")
 
         #expect(lines.count == 3) // header + 2 dokumenty
+    }
+
+    @Test func exportPreservesRawResponsesAsSeparateFiles() throws {
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("spice-raw-export-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: out) }
+
+        let results = [
+            SHExtractionResult(
+                source_file: "/tmp/a.pdf",
+                patient_name: "A",
+                patient_id: "1",
+                birth_date: "",
+                admission_date: "",
+                discharge_date: "",
+                diagnoses: [],
+                medication: [],
+                lab_values: [],
+                discharge_status: "",
+                warnings: [],
+                confidence: 0.5,
+                rawResponse: #"{"custom": "schema"}"#
+            ),
+            SHExtractionResult(
+                source_file: "/tmp/b.pdf",
+                patient_name: "B",
+                patient_id: "2",
+                birth_date: "",
+                admission_date: "",
+                discharge_date: "",
+                diagnoses: [],
+                medication: [],
+                lab_values: [],
+                discharge_status: "",
+                warnings: [],
+                confidence: 0.6,
+                rawResponse: "plain model output"
+            )
+        ]
+
+        try SHExportService().exportAll(results: results, outputFolder: out)
+
+        #expect(FileManager.default.fileExists(atPath: out.appendingPathComponent("a_raw.json").path))
+        #expect(FileManager.default.fileExists(atPath: out.appendingPathComponent("b_raw.txt").path))
+        #expect(FileManager.default.fileExists(atPath: out.appendingPathComponent("raw_responses.json").path))
+        let rawText = try String(contentsOf: out.appendingPathComponent("b_raw.txt"), encoding: .utf8)
+        #expect(rawText == "plain model output")
+    }
+
+    @Test func extractionModesExposeExpectedTitlesAndDefault() {
+        #expect(SHExtractionMode.fast.title == "FAST")
+        #expect(SHExtractionMode.search.title == "SEARCH")
+        #expect(SHExtractionMode.consolidate.title == "CONSOLIDATE")
+        #expect(SHAppConfig().extractionMode == .search)
+    }
+
+    @Test func readmeDoesNotRegressKnownDocumentationFacts() throws {
+        let readme = try String(contentsOf: repositoryRoot().appendingPathComponent("README.md"), encoding: .utf8)
+
+        #expect(readme.contains("macOS 15.6+"))
+        #expect(readme.contains("Výchozí režim aplikace je **SEARCH**."))
+        #expect(readme.contains("PDF soubory nebo jinými typy souborů"))
+        #expect(readme.contains("SPARK DGX"))
+        #expect(!readme.contains("macOS 14+"))
+        #expect(!readme.contains("Výchozí režim je **FAST**"))
+        #expect(!readme.contains("SPAR DGX"))
+    }
+
+    @Test func repositoryContributorMetadataDoesNotMentionExternalCoauthors() throws {
+        let root = repositoryRoot()
+        let forbidden = [
+            "Cl" + "aude",
+            "Co-" + "Authored-By: " + "Cl" + "aude",
+            "noreply@" + "anthropic.com"
+        ]
+        let files = [
+            root.appendingPathComponent("README.md"),
+            root.appendingPathComponent(".gitignore")
+        ]
+
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for needle in forbidden {
+                #expect(!text.localizedCaseInsensitiveContains(needle))
+            }
+        }
     }
 
     @Test func textCleanerRemovesRepeatedHeaderFooterCaseInsensitive() {
@@ -297,5 +527,22 @@ struct SpiceHarvesterTests {
         }
 
         #expect(observer.recentProjectURLs.map(\.path) == [peerPath])
+    }
+
+    private func repositoryRoot() -> URL {
+        var url = URL(fileURLWithPath: #filePath)
+        while url.lastPathComponent != "SpiceHarvesterTests" {
+            let next = url.deletingLastPathComponent()
+            if next == url { break }
+            url = next
+        }
+        return url.deletingLastPathComponent()
+    }
+}
+
+private struct NoopOCRProvider: SHOCRProviding {
+    func extractText(from fileURL: URL) async throws -> [String] {
+        Issue.record("OCR should not be called for plain text documents: \(fileURL.lastPathComponent)")
+        return []
     }
 }

@@ -647,7 +647,7 @@ final class SHAppViewModel {
 
     // MARK: – Input folder stats
 
-    /// Re-scans the input folder for PDFs and updates `inputFolderPdfCount` /
+    /// Re-scans the input folder for supported documents and updates `inputFolderPdfCount` /
     /// `inputFolderPdfBytes`. The scan runs on a detached background task —
     /// folders with thousands of files would otherwise block the main thread
     /// long enough to drop frames during typing / window resize. Subsequent
@@ -681,7 +681,7 @@ final class SHAppViewModel {
             defer { if started { url.stopAccessingSecurityScopedResource() } }
 
             let scanner = SHFileScanService()
-            let urls = scanner.recursivePDFs(in: url)
+            let urls = scanner.recursiveDocuments(in: url)
 
             // Cooperative cancellation between scan and size summation.
             if Task.isCancelled { return }
@@ -710,15 +710,15 @@ final class SHAppViewModel {
     var inputFolderChipLabel: String? {
         guard let count = inputFolderPdfCount else { return nil }
         if count == 0 {
-            return "Žádné PDF"
+            return "Žádné dokumenty"
         }
         if let bytes = inputFolderPdfBytes, bytes > 0 {
             let formatter = ByteCountFormatter()
             formatter.allowedUnits = [.useKB, .useMB, .useGB]
             formatter.countStyle = .file
-            return "\(count) PDF · \(formatter.string(fromByteCount: bytes))"
+            return "\(count) dokumentů · \(formatter.string(fromByteCount: bytes))"
         }
-        return "\(count) PDF"
+        return "\(count) dokumentů"
     }
 
     // MARK: – Item lifecycle (granular progress)
@@ -3060,7 +3060,8 @@ final class SHAppViewModel {
             let data = try Data(contentsOf: url)
             let result = try SHJSON.decoder().decode(SHExtractionResult.self, from: data)
             self.loadedResult = result
-            statusText = "Načteno: \(result.patient_name ?? "—") (\(result.source_file))"
+            let patientName = result.patient_name.isEmpty ? "—" : result.patient_name
+            statusText = "Načteno: \(patientName) (\(result.source_file))"
             self.lastCompletion = .success
             return .success(url: url)
         } catch {

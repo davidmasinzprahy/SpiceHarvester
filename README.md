@@ -5,13 +5,13 @@
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)](https://developer.apple.com/xcode/swiftui/)
 [![Architecture](https://img.shields.io/badge/architecture-MVVM-success)](#)
 
-Nativní macOS aplikace pro dávkovou extrakci strukturovaných dat z PDF dokumentů pomocí lokálního nebo LAN AI modelu.
+Nativní macOS aplikace pro dávkovou extrakci strukturovaných dat z dokumentů pomocí lokálního nebo LAN AI modelu.
 
 Spice Harvester projde složku s PDF soubory nebo jinými typy souborů, vytěží z nich text, podle zadaného promptu zavolá OpenAI-kompatibilní server a uloží výsledky do JSON, CSV a TXT. Server může běžet přímo na počítači uživatele nebo v důvěryhodné LAN. Aplikace nepoužívá cloudovou službu ani telemetrii.
 
 ## K čemu slouží
 
-- dávkové zpracování PDF dokumentů
+- dávkové zpracování PDF a textových dokumentů
 - extrakce dat podle vlastního promptu
 - práce s lokálními nebo LAN modely přes LM Studio, MLX nebo jiný OpenAI-kompatibilní backend
 - opakované běhy nad stejnými dokumenty díky cache
@@ -22,7 +22,7 @@ Spice Harvester projde složku s PDF soubory nebo jinými typy souborů, vytěž
 Zpracování má dvě fáze:
 
 1. **Předzpracování**  
-   Aplikace najde PDF soubory, spočítá jejich hash, vytěží text přes PDFKit nebo OCR a uloží vyčištěný text do cache.
+   Aplikace najde podporované dokumenty, spočítá jejich hash, vytěží text přes PDFKit, OCR nebo přímé čtení textu a uloží vyčištěný text do cache.
 
 2. **Extrakce**  
    Lokální nebo LAN AI model dostane vybraný kontext dokumentu a uživatelský prompt. Odpověď se uloží v původní podobě i v aplikačním výsledkovém formátu.
