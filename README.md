@@ -5,15 +5,15 @@
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)](https://developer.apple.com/xcode/swiftui/)
 [![Architecture](https://img.shields.io/badge/architecture-MVVM-success)](#)
 
-Nativní macOS aplikace pro dávkovou extrakci strukturovaných dat z PDF dokumentů pomocí lokálního AI modelu.
+Nativní macOS aplikace pro dávkovou extrakci strukturovaných dat z PDF dokumentů pomocí lokálního nebo LAN AI modelu.
 
-Spice Harvester projde složku s PDF soubory, vytěží z nich text, podle zadaného promptu zavolá lokální OpenAI-kompatibilní server a uloží výsledky do JSON, CSV a TXT. Data zůstávají na počítači uživatele: aplikace nepoužívá cloudovou službu ani telemetrii.
+Spice Harvester projde složku s PDF soubory, vytěží z nich text, podle zadaného promptu zavolá OpenAI-kompatibilní server a uloží výsledky do JSON, CSV a TXT. Server může běžet přímo na počítači uživatele nebo v důvěryhodné LAN. Aplikace nepoužívá cloudovou službu ani telemetrii.
 
 ## K čemu slouží
 
 - dávkové zpracování PDF dokumentů
 - extrakce dat podle vlastního promptu
-- práce s lokálními modely přes LM Studio, MLX nebo jiný OpenAI-kompatibilní backend
+- práce s lokálními nebo LAN modely přes LM Studio, MLX nebo jiný OpenAI-kompatibilní backend
 - opakované běhy nad stejnými dokumenty díky cache
 - export výsledků pro další zpracování v Excelu, Numbers, databázích nebo skriptech
 
@@ -25,7 +25,7 @@ Zpracování má dvě fáze:
    Aplikace najde PDF soubory, spočítá jejich hash, vytěží text přes PDFKit nebo OCR a uloží vyčištěný text do cache.
 
 2. **Extrakce**  
-   Lokální AI model dostane vybraný kontext dokumentu a uživatelský prompt. Odpověď se uloží v původní podobě i v aplikačním výsledkovém formátu.
+   Lokální nebo LAN AI model dostane vybraný kontext dokumentu a uživatelský prompt. Odpověď se uloží v původní podobě i v aplikačním výsledkovém formátu.
 
 ## Režimy extrakce
 
@@ -41,14 +41,15 @@ Výchozí režim aplikace je **SEARCH**.
 
 - macOS 15.6+
 - Xcode 16+
-- lokální OpenAI-kompatibilní server, například:
+- OpenAI-kompatibilní server dostupný lokálně nebo v LAN, například:
   - LM Studio: `http://localhost:1234/v1`
   - MLX server: `http://localhost:8000/v1`
+  - vzdálený server v LAN, např. SPARK DGX
   - Ollama, vLLM, llama.cpp nebo LocalAI s kompatibilním API
 
 ## Rychlý start
 
-1. Spusť lokální AI server a načti model.
+1. Spusť lokální nebo LAN AI server a načti model.
 2. Otevři `SpiceHarvester.xcodeproj` v Xcode.
 3. Spusť schéma `SpiceHarvester`.
 4. V aplikaci nastav vstupní, výstupní a cache složku.
