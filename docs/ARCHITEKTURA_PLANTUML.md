@@ -14,7 +14,7 @@ left to right direction
 actor "Uživatel" as User
 
 package "UI" {
-  [SpiceHarvesterApp\n(WindowGroup main + scratch\n+ Window help (singleton)\n+ Settings + .commands\n+ SHAppDelegate)] as APP
+  [SpiceHarvesterApp\n(WindowGroup main + scratch\n+ Window help (singleton)\n+ Settings + .commands\n+ .onOpenURL + import\n+ SHAppDelegate)] as APP
   [ContentView\n(HSplitView, runRow,\nVSplitView right column)] as CV
   [SettingsView\n(Settings scene + custom tab selector\nVýkon/OCR/Cache + search)] as SET
   [HelpSheet] as HELP
@@ -23,7 +23,7 @@ package "UI" {
 }
 
 package "Presentation" {
-  [SHAppViewModel\n(@Observable @MainActor)\nPersistenceMode (.persistent/.scratch)\nliveRegistry weak NSHashTable\nactiveOutputClaims static dict\nwindowTitle/windowSubtitle computed\nRunOutcome klasifikace\nServer health watcher\nProject save/load] as VM
+  [SHAppViewModel\n(@Observable @MainActor)\nPersistenceMode (.persistent/.scratch)\nliveRegistry weak NSHashTable\nactiveOutputClaims static dict\nwindowTitle/windowSubtitle computed\nRunOutcome klasifikace\nServer health watcher\nProject save/load\nloadedResult + openSpiceResultFile] as VM
 }
 
 package "Pipeline" {
@@ -37,7 +37,7 @@ package "Services" {
   [SHPDFParser\n(PDFKit + autoreleasepool)] as PDF
   [SHVisionOCRProvider\n(Task.detached + autoreleasepool)] as OCR
   [SHTextCleaningService\n(anchored patterns, v2)] as CLEAN
-  [SHOpenAICompatibleClient\n(OpenAI-compatible + retry\n+ LM Studio /api/v0)] as LM
+  [SHOpenAICompatibleClient\n(OpenAI-compatible + retry\n+ LAN: LM Studio, oMLX)] as LM
   [SHPromptLibraryService\n(rekurzivní enumerátor .md\nsouborů vč. podsložek)] as PROMPTS
   [SHPromptAnalyzer\n(mode suggestion heuristic)] as ANAL
   [SHBenchmarkService\n(wall-clock + phase metrics)] as BENCH
@@ -48,7 +48,7 @@ package "Storage" {
   [SHCacheManager\n(per-document JSON cache\nSHA-256 keyed)] as DOCCACHE
   [SHInferenceCache\n(LLM response cache\nversion+prompt+docs+model)] as INFCACHE
   [SHProcessingLogger\n(cached FileHandle,\ntail window, local TZ)] as LOG
-  [SHExportService\n(JSON/TXT/CSV/BOM + raw\n+ CSV/TXT markers split)] as EXP
+  [SHExportService\n(JSON/TXT/CSV/BOM + raw\n+ CSV/TXT markers split + import)] as EXP
   [SHConfigStore +\nSHServerRegistryStore\n(UserDefaults + flush on terminate)] as CFG
 }
 
@@ -90,6 +90,10 @@ EXT --> BENCH
 EXT ..> DOCCACHE : vstup cached docs
 EXP ..> EXT : výsledky
 
+User --> APP : otevření .spice-result.json
+APP ..> VM : openSpiceResultFile
+VM .> EXT : loadedResult (UI zobrazení\nžádný pipeline běh)
+
 @enduml
 ```
 
@@ -98,6 +102,8 @@ EXP ..> EXT : výsledky
 - **`SpiceHarvesterApp`** (App scene root):
   - Hostuje `@State vm = SHAppViewModel()` na úrovni App, takže `ContentView` i `Settings` scéna pracují nad totožným modelem.
   - `WindowGroup { ContentView }` + `Settings { SettingsView }` (Cmd+,) + `.commands { CommandGroup(replacing: .newItem | .help) }` (Cmd+R / Cmd+. / Cmd+Shift+P / Cmd+Shift+E / Cmd+Shift+O / Cmd+?).
+  - `.onOpenURL { urls in ... }` — přijímá `.spice-result.json` od macOS (double-click / .spice-result.json file association).
+  - `SHAppDelegate.primaryViewModel` bridge (`weak property`) → `application(_:open:)` fallback pro background launch.
   - `SHAppDelegate` po startu adaptuje frame okna na `NSScreen.visibleFrame` (full height, capped width).
 
 - **`ContentView`** (dvousloupcový HSplitView):
@@ -126,6 +132,8 @@ EXP ..> EXT : výsledky
   - Auto-detekce kontextu při `Ověřit server`
   - **Auto-refresh kontextu před velkým CONSOLIDATE** (`refreshModelContextIfRisky`) — silent fetch `/api/v0/models` před batch, který by byl blízko limitu
   - `withScopedAccess(to:body:)` helper pro DRY security-scoped URL pattern
+  - `loadedResult: SHExtractionResult?` — načtený importovaný výsledek (`.spice-result.json`); UI v disabled pipeline režimu
+  - `openSpiceResultFile(_ url: URL) -> SHOpenSpiceResultOutcome` — decode → loadedResult
 
 - **`SHPreprocessingPipeline`** (FÁZE 1):
   - Scan PDF + streamovaný hash
@@ -152,6 +160,7 @@ EXP ..> EXT : výsledky
 - **`SHOpenAICompatibleClient`**:
   - OpenAI-compatible: `/v1/models`, `/v1/chat/completions`, `/v1/embeddings`
   - LM Studio native: `/api/v0/models` (s `max_context_length` + `loaded_context_length`)
+  - Podpora LAN serverů — HTTP komunikace na libovolném stroji v síti (LM Studio na localhost, oMLX na jiném stroji, vlastní proxy)
   - `send(_:)` wrapper s retry (502/503/504, timeout, connection-lost) + exponential backoff
   - Cancellation-aware (URLSession + explicit checks)
   - URL přes `URLComponents` — handle trailing `/v1`, `URLError.badURL` edge cases
@@ -188,7 +197,16 @@ EXP ..> EXT : výsledky
   - Raw export: detekce `=====CSV=====` / `=====TXT=====` markerů → split do dvou souborů
   - Per-dokument `{name}_raw.{json,csv,txt}` podle obsahu
   - Agregát `raw_responses.json`
+  - Export souborů `*.spice-result.json` (per-file, dedup `{name}_N.spice-result.json`)
+  - **Import** `.spice-result.json`: Cmd+Shift+R / Finder double-click → `SHAppViewModel.openSpiceResultFile(url)` → `loadedResult: SHExtractionResult?` → UI banner s daty bez pipeline běhu
   - Sdílený `SHJSON` factory
+
+### Import výsledku
+1. Uživatel otevře `.spice-result.json` soubor (Finder double-click nebo Cmd+Shift+R).
+2. `SHAppViewModel.openSpiceResultFile(url)` → načte soubor, dekóduje přes `SHJSON.decoder()` jako `SHExtractionResult`.
+3. Na úspěch: `loadedResult = result`, zobrazí se banner s pacientem, diagnózami, laboratorními hodnotami.
+4. Všechna pipeline tlačítka jsou disabled (nelze spustit běh při načteném výsledku).
+5. Kliknutí na "Zavřít výsledek" (= `vm.loadedResult = nil`) → zpět k běžnému režimu.
 
 ## Hlavní datový tok
 
