@@ -7,7 +7,7 @@
 
 Nativní macOS aplikace pro dávkovou extrakci strukturovaných dat z PDF dokumentů pomocí lokálního nebo LAN AI modelu.
 
-Spice Harvester projde složku s PDF soubory, vytěží z nich text, podle zadaného promptu zavolá OpenAI-kompatibilní server a uloží výsledky do JSON, CSV a TXT. Server může běžet přímo na počítači uživatele nebo v důvěryhodné LAN. Aplikace nepoužívá cloudovou službu ani telemetrii.
+Spice Harvester projde složku s PDF soubory nebo jinými typy souborů, vytěží z nich text, podle zadaného promptu zavolá OpenAI-kompatibilní server a uloží výsledky do JSON, CSV a TXT. Server může běžet přímo na počítači uživatele nebo v důvěryhodné LAN. Aplikace nepoužívá cloudovou službu ani telemetrii.
 
 ## K čemu slouží
 
