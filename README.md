@@ -5,14 +5,14 @@
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)](https://developer.apple.com/xcode/swiftui/)
 [![Architecture](https://img.shields.io/badge/architecture-MVVM-success)](#)
 
-Lokální desktop aplikace pro macOS pro rychlé dávkové vytěžování dat z PDF dokumentů přes lokální LLM (LM Studio nebo MLX). Původně vznikla nad zdravotnickou dokumentací — **ambulantní, propouštěcí a překladové zprávy, laboratorní výsledky** — ale díky tomu, že **schéma výstupu definuje uživatelský prompt**, ji lze použít na libovolný typ dokumentů: smlouvy, faktury, posudky, zápisy, technické zprávy, korespondenci atd.
+Desktopová aplikace pro macOS pro rychlé dávkové vytěžování dat z PDF dokumentů přes OpenAI-compatible servery — ať už běží lokálně (LM Studio) nebo na vzdáleném stroji v LAN (např. **oMLX**). Aplikace je určena pro **privátní vytěžování** na soukromé síti — data opouští machine bez cloudu ani telemetrie. Původně vznikla nad zdravotnickou dokumentací — **ambulantní, propouštěcí a překladové zprávy, laboratorní výsledky** — ale díky tomu, že **schéma výstupu definuje uživatelský prompt**, ji lze použít na libovolný typ dokumentů: smlouvy, faktury, posudky, zápisy, technické zprávy, korespondenci atd.
 
 > Data zůstávají lokálně. Žádný cloud, žádný telemetry.
 
 Pipeline je dvoufázová:
 
 1. **Předzpracování + cache** — scan / hash / PDFKit / OCR / clean → JSON cache
-2. **Extrakce přes lokální OpenAI-compatible server** — LM Studio nebo MLX backend, uživatelem definovaný prompt a schéma výstupu
+2. **Extrakce** — OpenAI-compatible API (`/chat/completions`) na libovolném backendu (LM Studio, oMLX, nebo jiný server v LAN), uživatelem definovaný prompt a schéma výstupu
 
 Výchozí režim je **FAST** (bez embeddingů).
 
@@ -38,7 +38,7 @@ Výchozí režim je **FAST** (bez embeddingů).
 - PDFKit + Vision OCR fallback, thread-safe rendering, autoreleasepool na stránku
 - Tři režimy extrakce: **FAST** / **SEARCH** (RAG s embeddingy a volitelným rerankerem) / **CONSOLIDATE** (s map-reduce fallbackem)
 - Dvoustupňová cache (per-dokument + per-inference) — instant hit při ladění promptu
-- Pre-flight token budget check + auto-detekce context length z LM Studio API
+- Pre-flight token budget check + auto-detekce context length z LM Studio API (fallback na ruční nastavení pro ostatní backendy)
 - Parameter conflict detection v promptu s jednoklikovým přepnutím režimu (debounced 400 ms)
 - Typed `SHRunOutcome` (success / cancelled / failed / notStarted) + persistentní completion badge v UI
 - Export: JSON (canonical), TXT, CSV (UTF-8 BOM pro Excel), per-dokument `*.spice-result.json` (s UTI registrací), `*_raw.json` / `*_raw.csv` / `*_raw.txt`, agregátní `raw_responses.json`
@@ -85,7 +85,8 @@ Výchozí režim je **FAST** (bez embeddingů).
 - Xcode 16+
 - Spuštěný lokální OpenAI-compatible server:
   - **LM Studio** — typicky `http://localhost:1234/v1` (auto-detekce kontextu)
-  - nebo **MLX OpenAI-compatible server** — typicky `http://localhost:8000/v1` (kontext nastav ručně v Předvolbách)
+  - nebo **oMLX** — typicky `http://localhost:8000/v1` (kontext nastav ručně v Předvolbách)
+  - Libovolný OpenAI-compatible server v LAN (`http://<ip>:<port>/v1`)
 
 ### Spuštění
 
@@ -93,7 +94,7 @@ Výchozí režim je **FAST** (bez embeddingů).
 2. Spusť schéma `SpiceHarvester` (`Cmd+R`).
 3. V levém sloupci nastav:
    - **Složky** — vstupní / výstupní / cache složku (lze přetáhnout z Finderu)
-   - **Server a model** — adresu, klikni **Ověřit**, vyber inference model. Po přepnutí mezi LM Studio / MLX se model selections vyčistí. Pro SEARCH vyber i embedding model (aplikace endpoint krátce ověří) a volitelně reranker pro `/v1/rerank`.
+   - **Server a model** — adresu, klikni **Ověřit**, vyber inference model. Po přepnutí mezi servery se model selections vyčistí. Pro SEARCH vyber i embedding model (aplikace endpoint krátce ověří) a volitelně reranker pro `/v1/rerank`.
    - **Prompt** — vlož ručně nebo přes **Načíst** z `.md`
 4. OCR backend (Apple Vision / VLM / Vision→VLM) se nastavuje v **Předvolbách → OCR** (`Cmd+,`). Pro skenované PDF doplň **OCR/VLM** model v hlavním okně.
 5. Stiskni **Spustit** v horní liště (`Cmd+R`).
@@ -199,13 +200,13 @@ Steppery v **Předvolbách → Výkon** (`Cmd+,`):
 
 ### Sandbox a entitlementy
 - **App Sandbox** zapnutý (`com.apple.security.app-sandbox`).
-- **`NSAllowsLocalNetworking`** — ATS nastavení v Info.plist build settings (`INFOPLIST_KEY_NSAppTransportSecurity` v project.pbxproj), **ne** entitlement v `.entitlements` souboru. Povoluje ATS pouze pro local network (LM Studio na localhost). Zpřísněno z `NSAllowsArbitraryLoads`, který by povoloval libovolné HTTP cíle. (`.entitlements` obsahuje jen app-sandbox, files.user-selected.read-write, network.client a network.server.)
+- **`NSAllowsLocalNetworking`** — ATS nastavení v Info.plist build settings (`INFOPLIST_KEY_NSAppTransportSecurity` v project.pbxproj), **ne** entitlement v `.entitlements` souboru. Povoluje HTTP komunikaci na serverech v LAN (localhost i vzdálené stroje). Zpřísněno z `NSAllowsArbitraryLoads`, který by povoloval libovolné HTTP cíle. (`.entitlements` obsahuje jen app-sandbox, files.user-selected.read-write, network.client a network.server.)
 - **`com.apple.security.files.user-selected.read-write`** — přístup pouze ke složkám, které uživatel explicitně vybral přes NSOpenPanel + jejich security-scoped bookmarks.
 - **`com.apple.security.network.client`** — odchozí HTTP požadavky na LM server.
 - **`com.apple.security.network.server`** — historicky vyžadováno pro localhost connections v některých macOS verzích. Pro pure-client app technicky nadbytečné, ale ponecháno z důvodu kompatibility.
 
 ### Citlivá data
-- **API klíče** v `SHServerConfig.apiKey` jsou aktuálně **plaintext v UserDefaults** (sandbox container `~/Library/Containers/.../Preferences/`). Pro lokální LM Studio (default bez auth) je pole prázdné, takže expozice je teoretická. Pro hosted OpenAI-compatible proxy s bearer tokenem je třeba pamatovat, že token přežívá v UserDefaults. Migrace na Keychain je v [docs/P2_BACKLOG_DEFERRED.md](docs/P2_BACKLOG_DEFERRED.md).
+- **API klíče** v `SHServerConfig.apiKey` jsou aktuálně **plaintext v UserDefaults** (sandbox container `~/Library/Containers/.../Preferences/`). Pro lokální LM Studio (default bez auth) nebo LAN servery bez auth je pole prázdné, takže expozice je teoretická. Pro hosted OpenAI-compatible proxy s bearer tokenem je třeba pamatovat, že token přežívá v UserDefaults. Migrace na Keychain je v [docs/P2_BACKLOG_DEFERRED.md](docs/P2_BACKLOG_DEFERRED.md).
 - **Notifikační banner** (success/cancelled/failed) obsahuje pouze **generický text** — žádné filename, error detail nebo PHI. Detaily ostávají v hlavním okně. Důvod: notifikace jsou viditelné na lock screenu i ostatním lidem.
 - **Log v `processing.log`** může obsahovat names PDF souborů, error stacks a (v medical-records kontextu) PHI fragmenty. Soubor žije ve výstupní složce uživatele — uživatel je odpovědný za její ochranu.
 - **Pasteboard** přes Cmd+C v log card nebo drag-out z Output button — uživatelem iniciovaný kopírovací akt; obsah jde mimo aplikaci (Slack, Mail, Finder) podle vůle uživatele.
