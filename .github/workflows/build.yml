@@ -1,0 +1,38 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build (Release)
+        run: |
+          xcodebuild build \
+            -project SpiceHarvester.xcodeproj \
+            -scheme SpiceHarvester \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Run unit tests
+        run: |
+          xcodebuild test \
+            -project SpiceHarvester.xcodeproj \
+            -scheme SpiceHarvester \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -only-testing:SpiceHarvesterTests \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=NO
