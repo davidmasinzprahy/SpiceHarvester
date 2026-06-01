@@ -5,7 +5,7 @@
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)](https://developer.apple.com/xcode/swiftui/)
 [![Architecture](https://img.shields.io/badge/architecture-MVVM-success)](#)
 
-Desktopová aplikace pro macOS pro rychlé dávkové vytěžování dat z PDF dokumentů přes OpenAI-compatible servery — ať už běží lokálně (LM Studio) nebo na vzdáleném stroji v LAN (např. **oMLX**). Aplikace je určena pro **privátní vytěžování** na soukromé síti — data opouští machine bez cloudu ani telemetrie. Původně vznikla nad zdravotnickou dokumentací — **ambulantní, propouštěcí a překladové zprávy, laboratorní výsledky** — ale díky tomu, že **schéma výstupu definuje uživatelský prompt**, ji lze použít na libovolný typ dokumentů: smlouvy, faktury, posudky, zápisy, technické zprávy, korespondenci atd.
+Nativní macOS desktopová aplikace, která dávkově projde složku s PDF dokumenty, vytěží z nich data podle vašeho promptu a vyexportuje výsledky do JSON, TXT nebo CSV. Veškerá inference běží na lokálním OpenAI-kompatibilním serveru (LM Studio nebo MLX). Žádný cloud, žádná telemetrie, data neopouští počítač uživatele.
 
 > Data zůstávají lokálně. Žádný cloud, žádný telemetry.
 
@@ -29,10 +29,10 @@ Výchozí režim je **FAST** (bez embeddingů).
 ### Předpoklady
 
 - macOS 14+ (Sonoma), Xcode 16+
-- Spuštěný lokální OpenAI-compatible server:
+- Spuštěný lokální OpenAI-kompatibilní server:
   - **LM Studio** — typicky `http://localhost:1234/v1` (auto-detekce kontextu)
-  - nebo **oMLX** — typicky `http://localhost:8000/v1` (kontext nastav ručně)
-  - Libovolný OpenAI-compatible server v LAN (`http://<ip>:<port>/v1`)
+  - **MLX server** — typicky `http://localhost:8000/v1` (kontext nastav ručně)
+  - Libovolný OpenAI-kompatibilní server (Ollama, vLLM, llama.cpp, LocalAI)
 
 ### Spuštění
 
@@ -63,7 +63,7 @@ Per-dokument soubory `{name}.spice-result.json` (UTI registrace `DavidMasin.Spic
 
 ## Bezpečnost
 
-- **App Sandbox** zapnutý. **`NSAllowsLocalNetworking`** v Info.plist — HTTP komunikace na serverech v LAN.
+- **App Sandbox** zapnutý. **`NSAllowsLocalNetworking`** v Info.plist — HTTP komunikace na lokálním serveru.
 - API klíče jsou aktuálně plaintext v UserDefaults (migrace na Keychain v [P2_BACKLOG_DEFERRED.md](docs/P2_BACKLOG_DEFERRED.md)).
 - Notifikační bannery obsahují pouze generický text — žádné filename, error detail nebo PHI.
 
