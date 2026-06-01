@@ -41,7 +41,8 @@ Výchozí režim je **FAST** (bez embeddingů).
 - Pre-flight token budget check + auto-detekce context length z LM Studio API
 - Parameter conflict detection v promptu s jednoklikovým přepnutím režimu (debounced 400 ms)
 - Typed `SHRunOutcome` (success / cancelled / failed / notStarted) + persistentní completion badge v UI
-- Export: JSON (canonical), TXT, CSV (UTF-8 BOM pro Excel), per-dokument `*_raw.json` / `*_raw.csv` / `*_raw.txt`, agregátní `raw_responses.json`
+- Export: JSON (canonical), TXT, CSV (UTF-8 BOM pro Excel), per-dokument `*.spice-result.json` (s UTI registrací), `*_raw.json` / `*_raw.csv` / `*_raw.txt`, agregátní `raw_responses.json`
+- Import: "Otevřít výsledek…" (Cmd+Shift+R) nebo double-click `.spice-result.json` z Finderu — pipeline je během zobrazení disabled
 
 ### UX a produktivita
 - **Multi-window**: primary + scratch okna (Cmd+Shift+N) s nezávislým view-modelem; scratch okna nepersistují konfiguraci do UserDefaults. **Titulek + podtitulek per-tab** (vstupní složka · server · režim · progres) takže po sloučení do tabů poznáš každou záložku. **Kolize výstupní složky** je detekována a druhý paralelní běh do stejné cesty se zablokuje.
@@ -123,6 +124,8 @@ Aplikace přistupuje k uživatelskému promptu jako k **jediné autoritě nad tv
 
 Pipeline se nejdřív pokusí dekódovat odpověď proti vestavěnému kanonickému schématu (`SHExtractionResult` — historicky tvořené medicínskými atributy `patient_name`, `diagnoses`, …, ale slouží jen jako fallback dekodér). **Když odpověď proti němu neprojde, raw text se vždy zachová v `rawResponse`** bez volání repair-retry (repair byl odstraněn, protože nad custom schématy generoval falešné kanonické záznamy). Custom schémata jsou tím pádem plnohodnotná: prompt si je definuje sám a aplikace je propíše do exportu beze ztráty.
 
+Na disku se per-dokument JSON soubory pojmenovávají `{name}.spice-result.json` — rozlišují se podle UTI `DavidMasin.SpiceHarvester.result` v `Info.plist` (✅ Finder file association, ✅ QuickLook preview). Tyto soubory lze znovu otevřít v aplikaci přes **Otevřít výsledek…** (`Cmd+Shift+R`) nebo přímým double-clickem z Finderu — pipeline je během zobrazení výsledku disabled.
+
 **Speciální výstupní konvence pro CSV+TXT:** pokud prompt instruuje model vrátit výstup oddělený markery `=====CSV=====` / `=====TXT=====`, export to detekuje a uloží jako samostatné `{name}_raw.csv` a `{name}_raw.txt`. Viz [docs/PROMPT_TXT_NAVOD.md](docs/PROMPT_TXT_NAVOD.md).
 
 ## Klávesové zkratky
@@ -134,6 +137,7 @@ Pipeline se nejdřív pokusí dekódovat odpověď proti vestavěnému kanonick�
 | Předzpracování | `Cmd+Shift+P` |
 | Extrakce | `Cmd+Shift+E` |
 | Otevřít výstup ve Finderu | `Cmd+Shift+O` |
+| **Otevřít výsledek…** | `Cmd+Shift+R` (načte `*.spice-result.json` exportovaný přes Export → JSON) |
 | **Otevřít projekt…** | `Cmd+O` |
 | **Uložit projekt jako…** | `Cmd+Shift+S` |
 | **Nové okno (scratch)** | `Cmd+Shift+N` |
@@ -149,7 +153,7 @@ Pipeline se nejdřív pokusí dekódovat odpověď proti vestavěnému kanonick�
 
 | Menu | Položky |
 |---|---|
-| **File** | Nové okno (scratch) `Cmd+Shift+N` · Otevřít projekt… `Cmd+O` · Otevřít nedávné › … · Uložit projekt jako… `Cmd+Shift+S` · Otevřít výstup ve Finderu `Cmd+Shift+O` |
+| **File** | Nové okno (scratch) `Cmd+Shift+N` · Otevřít projekt… `Cmd+O` · Otevřít nedávné › … · Uložit projekt jako… `Cmd+Shift+S` · Otevřít výsledek… `Cmd+Shift+R` · Otevřít výstup ve Finderu `Cmd+Shift+O` |
 | **Pipeline** *(custom top-level)* | Spustit `Cmd+R` · Přerušit `Cmd+.` · Předzpracování `Cmd+Shift+P` · Extrakce `Cmd+Shift+E` · Režim FAST / SEARCH / CONSOLIDATE `Cmd+1/2/3` · Znovu ověřit zdraví serveru |
 | **Help** | Nápověda Spice Harvester `Cmd+?` |
 
@@ -227,6 +231,58 @@ Source je připravený s HTML escape pro `source_file` title (XSS guard) — viz
 - `SHProjectSnapshot` Codable struct — folders, model picks, mode, prompt, lastLoadedPromptName.
 - **Vyloučeno**: server registry (sdíleno globálně), runtime state, performance prefs.
 - Open Project detekuje cesty bez stored security-scoped bookmarku a vyzve k re-pick (sandbox není možné obejít).
+
+## Struktura repozitáře
+
+```text
+SpiceHarvester/
+├─ .github/workflows/build.yml   # CI: xcodebuild Release + unit tests na push/PR
+├─ .gitignore                    # Blokuje xcuserdata/, DerivedData/, .DS_Store, …
+├─ docs/                         # Uživatelská i technická dokumentace
+│  ├─ NAPOVEDA_UZIVATEL.md      # Kompletní návod k použití
+│  ├─ KODOVA_DOKUMENTACE.md     # Architektura, pipeline, persistence, cache
+│  ├─ P2_BACKLOG_DEFERRED.md    # Odložené funkce s implementačními poznámkami
+│  ├─ UI_DESIGN.md              # UI komponenty a design guidelines
+│  ├─ ARCHITEKTURA_PLANTUML.md  # Diagramy
+│  ├─ PROMPT_TXT_NAVOD.md       # Práce s prompty
+│  └─ TERMINOLOGIE.md           # Kanonické pojmy
+├─ SpiceHarvester/               # Hlavní aplikace (Xcode target)
+│  ├─ Info.plist                 # CFBundleDocumentTypes + UTI (SpiceHarvester.result)
+│  ├─ SpiceHarvester.entitlements      # Sandbox + user-selected + network (Release)
+│  ├─ SpiceHarvesterDebug.entitlements  # Debug výjimky (code-sign)
+│  ├─ Localizable.xcstrings      # CS + EN lokalizace
+│  ├─ SpiceHarvesterApp.swift    # Scenes + SHAppDelegate (Notification + open URL)
+│  ├─ ContentView.swift          # HSplitView root, runRow, focus management
+│  ├─ Models/                    # Codable structs (SHAppConfig, SHExtractionResult, …)
+│  ├─ ViewModels/
+│  │  └─ SHAppViewModel.swift    # @Observable @MainActor — config, runtime, persistence
+│  ├─ Views/
+│  │  ├─ GlassCard.swift         # Materiálový kontejner
+│  │  ├─ HelpSheet.swift         # Pomocné okno (singleton)
+│  │  ├─ SettingsView.swift      # Cmd+, settings scene (Výkon / OCR / Cache)
+│  │  └─ SHLogTextView.swift     # NSViewRepresentable wrapping NSTextView
+│  ├─ Services/                  # Prompt analyzer, PDF scan, text cleaning, server registry
+│  ├─ Pipeline/                  # Preprocessing + Extraction (FAST/SEARCH/CONSOLIDATE)
+│  ├─ Cache/                     # SHCacheManager + SHInferenceCache
+│  ├─ Logging/                   # SHProcessingLogger
+│  ├─ Export/
+│  │  └─ SHExportService.swift   # JSON/CSV/TXT export + import .spice-result.json
+│  ├─ AppIntents/
+│  │  └─ SHAppIntents.swift      # Shortcuts.app integrace (run, open output)
+│  └─ QuickLook/
+│     └─ SHQuickLookPreview.swift   # QLP provider source (scaffolding)
+├─ SpiceHarvesterQuickLook/      # Quick Look Preview Extension (scaffolding)
+│  ├─ Info.plist                 # UTI registrace (DavidMasin.SpiceHarvester.result)
+│  └─ SHQuickLookPreview.swift   # QLP Provider — přidat do Xcode targetu
+├─ Legacy/                       # Archivovaná stará implementace
+├─ settings.local.json           # Lokální nastavení (ignorováno git)
+└─ processing.log                # Output Runtime log (nevyskytuje se v repou)
+```
+
+Klíčové změny oproti předchozí verzi:
+- `Info.plist` teď obsahuje `CFBundleDocumentTypes` + `UTExportedTypeDeclarations` pro automatické otevírání `.spice-result.json` souborů z Finderu (双-click / Cmd+Shift+R).
+- `SpiceHarvesterQuickLook/` obsahuje scaffolding pro Quick Look Preview Extension — je třeba přidat target v Xcode.
+- `.github/workflows/build.yml` automaticky builduje a testuje na každý push/PR do `main`.
 
 ## Dokumentace
 
