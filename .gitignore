@@ -1,2 +1,39 @@
+# macOS
 .DS_Store
-.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift
+.build/
+DerivedData/
+*.swiftpm/
+.xcode.env
+
+# Xcode user data (per-machine, per-user)
+xcuserdata/
+*.xcscmblueprint
+*.xcscmblueprintd
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/
+Build/
+
+# Fastlane
+fastlane/report.xml
+fastlane/screenshots/
+fastlane/test_output/
+
+# Compiled artifacts
+*.o
+*.a
+*.so
+
+# Backup files
+*~
+*.bak
+
+# Local settings (if used)
+settings.local.json
