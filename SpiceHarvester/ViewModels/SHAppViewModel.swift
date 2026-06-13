@@ -2490,13 +2490,23 @@ final class SHAppViewModel {
             self.embeddingCache = SHEmbeddingCache(cacheRoot: cacheRoot)
 
             let ocrProvider = try makeOCRProvider()
+            var preprocessSignature = preprocessingSignature()
+            if config.officeConversionEnabled || config.popplerPDFTextEnabled {
+                // Verze CLI nástrojů v signatuře: změna pandoc/pdftotext invaliduje
+                // dotčené dokumenty. Počítá se jen když je konverze zapnutá.
+                let toolSignature = await SHToolRegistry().signatureComponent(for: [.pandoc, .pdftotext])
+                preprocessSignature += "|tools:" + toolSignature
+            }
             let pipeline = SHPreprocessingPipeline(
+                converter: SHDocumentConverter(),
+                officeConversionEnabled: config.officeConversionEnabled,
+                popplerPDFTextEnabled: config.popplerPDFTextEnabled,
                 ocrProvider: ocrProvider,
                 cacheManager: cache,
                 logger: logger,
                 benchmark: benchmarkService,
                 maxConcurrentWorkers: config.maxConcurrentPDFWorkers,
-                preprocessingSignature: preprocessingSignature()
+                preprocessingSignature: preprocessSignature
             )
 
             let output = await pipeline.run(
