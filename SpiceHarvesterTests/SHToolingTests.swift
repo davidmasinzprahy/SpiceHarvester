@@ -81,4 +81,14 @@ import Testing
         let url = URL(fileURLWithPath: "/tmp/a.txt")
         #expect(await converter.convert(fileURL: url, popplerPDFTextEnabled: false) == nil)
     }
+
+    @Test func scannerSupportsOfficeAndSpreadsheetExtensions() {
+        let ext = SHFileScanService.supportedDocumentExtensions
+        for e in ["docx", "odt", "rtf", "html", "htm", "epub", "xlsx", "xls"] {
+            #expect(ext.contains(e), "chybí přípona \(e)")
+        }
+        // stávající nesmí zmizet
+        #expect(ext.contains("pdf"))
+        #expect(ext.contains("txt"))
+    }
 }

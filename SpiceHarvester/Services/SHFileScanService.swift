@@ -10,7 +10,17 @@ struct SHFileScanService {
         "markdown",
         "csv",
         "tsv",
-        "json"
+        "json",
+        // office (pandoc, Fáze 1)
+        "docx",
+        "odt",
+        "rtf",
+        "html",
+        "htm",
+        "epub",
+        // tabulky (csvkit, Fáze 2 — sken už je hledá, konverze přijde s Fází 2)
+        "xlsx",
+        "xls"
     ]
 
     func recursiveDocuments(in root: URL) -> [URL] {
