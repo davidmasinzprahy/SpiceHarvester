@@ -60,4 +60,25 @@ import Testing
         #expect(route("a.txt") == .native)
         #expect(route("a.csv") == .native)
     }
+
+    @Test func converterPandocReadsHtmlWhenAvailable() async throws {
+        let converter = SHDocumentConverter()
+        guard converter.runtime.resolve(.pandoc) != nil else { return } // přeskoč
+
+        let fm = FileManager.default
+        let url = fm.temporaryDirectory.appendingPathComponent("doc-\(UUID().uuidString).html")
+        try "<h1>Pacient</h1><p>Jan Novak</p>".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? fm.removeItem(at: url) }
+
+        let result = try #require(await converter.convert(fileURL: url, popplerPDFTextEnabled: false))
+        #expect(result.hasTextLayer == true)
+        #expect(result.pageCount == 1)
+        #expect(result.rawPages.first?.contains("Jan Novak") == true)
+    }
+
+    @Test func converterReturnsNilForNativeRoute() async throws {
+        let converter = SHDocumentConverter()
+        let url = URL(fileURLWithPath: "/tmp/a.txt")
+        #expect(await converter.convert(fileURL: url, popplerPDFTextEnabled: false) == nil)
+    }
 }
