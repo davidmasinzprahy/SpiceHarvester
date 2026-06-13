@@ -91,4 +91,15 @@ import Testing
         #expect(ext.contains("pdf"))
         #expect(ext.contains("txt"))
     }
+
+    @Test func appConfigToolingDefaultsAndCodableRoundtrip() throws {
+        let config = SHAppConfig()
+        #expect(config.officeConversionEnabled == true)
+        #expect(config.popplerPDFTextEnabled == false)
+
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(SHAppConfig.self, from: data)
+        #expect(decoded.officeConversionEnabled == true)
+        #expect(decoded.popplerPDFTextEnabled == false)
+    }
 }

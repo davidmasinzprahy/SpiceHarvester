@@ -120,6 +120,10 @@ struct SHAppConfig: Codable, Sendable {
     /// Last file name (inside `promptFolder`) whose content was loaded into `currentPrompt`.
     /// Used only to show the active selection in the picker.
     var lastLoadedPromptName: String = ""
+    /// Konverze office dokumentů (docx/odt/rtf/html/epub) přes pandoc. Default zapnuto.
+    var officeConversionEnabled: Bool = true
+    /// Extrakce textu z PDF přes `pdftotext -layout` místo PDFKit. Default vypnuto (opt-in).
+    var popplerPDFTextEnabled: Bool = false
 
     init() {}
 
@@ -131,6 +135,7 @@ struct SHAppConfig: Codable, Sendable {
         case throttleDelayMs, folderBookmarks, currentPrompt, lastLoadedPromptName
         case modelContextTokens, bypassInferenceCache, requestTimeoutSeconds
         case lastRunAvgDocumentMs, lastRunAvgPageMs
+        case officeConversionEnabled, popplerPDFTextEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -158,5 +163,7 @@ struct SHAppConfig: Codable, Sendable {
         requestTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .requestTimeoutSeconds) ?? 600
         lastRunAvgDocumentMs = try c.decodeIfPresent(Double.self, forKey: .lastRunAvgDocumentMs) ?? 0
         lastRunAvgPageMs = try c.decodeIfPresent(Double.self, forKey: .lastRunAvgPageMs) ?? 0
+        officeConversionEnabled = try c.decodeIfPresent(Bool.self, forKey: .officeConversionEnabled) ?? true
+        popplerPDFTextEnabled = try c.decodeIfPresent(Bool.self, forKey: .popplerPDFTextEnabled) ?? false
     }
 }
