@@ -540,7 +540,7 @@ struct SpiceHarvesterTests {
     }
 }
 
-private struct NoopOCRProvider: SHOCRProviding {
+struct NoopOCRProvider: SHOCRProviding {
     func extractText(from fileURL: URL) async throws -> [String] {
         Issue.record("OCR should not be called for plain text documents: \(fileURL.lastPathComponent)")
         return []

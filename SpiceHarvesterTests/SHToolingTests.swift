@@ -102,4 +102,33 @@ import Testing
         #expect(decoded.officeConversionEnabled == true)
         #expect(decoded.popplerPDFTextEnabled == false)
     }
+
+    @Test func pipelineUsesConverterThenFallsBackToNative() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("conv-\(UUID().uuidString)")
+        let cacheRoot = fm.temporaryDirectory.appendingPathComponent("conv-cache-\(UUID().uuidString)")
+        let logRoot = fm.temporaryDirectory.appendingPathComponent("conv-log-\(UUID().uuidString)")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        try fm.createDirectory(at: logRoot, withIntermediateDirectories: true)
+        defer { for u in [root, cacheRoot, logRoot] { try? fm.removeItem(at: u) } }
+
+        // .txt jde nativní cestou (converter pro txt vrací nil)
+        try "Pacient Jan".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+
+        let pipeline = SHPreprocessingPipeline(
+            converter: SHDocumentConverter(),
+            officeConversionEnabled: true,
+            popplerPDFTextEnabled: false,
+            ocrProvider: NoopOCRProvider(),
+            cacheManager: SHCacheManager(cacheRoot: cacheRoot),
+            logger: SHProcessingLogger(logFileURL: logRoot.appendingPathComponent("p.log")),
+            benchmark: SHBenchmarkService(),
+            maxConcurrentWorkers: 1
+        )
+
+        let output = await pipeline.run(inputFolder: root, onCounters: { _ in })
+        let doc = try #require(output.cachedDocuments.first)
+        #expect(doc.cleanedText.contains("Pacient Jan"))
+        #expect(doc.metadata.hasTextLayer == true)
+    }
 }

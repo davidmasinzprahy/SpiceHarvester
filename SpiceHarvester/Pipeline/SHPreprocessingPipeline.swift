@@ -10,6 +10,9 @@ final class SHPreprocessingPipeline {
     private let scanner = SHFileScanService()
     private let parser = SHPDFParser()
     private let cleaner = SHTextCleaningService()
+    private let converter: SHDocumentConverter
+    private let officeConversionEnabled: Bool
+    private let popplerPDFTextEnabled: Bool
     private let ocrProvider: SHOCRProviding
     private let cacheManager: SHCacheManager
     private let logger: SHProcessingLogger
@@ -18,6 +21,9 @@ final class SHPreprocessingPipeline {
     private let preprocessingSignature: String
 
     init(
+        converter: SHDocumentConverter = SHDocumentConverter(),
+        officeConversionEnabled: Bool = false,
+        popplerPDFTextEnabled: Bool = false,
         ocrProvider: SHOCRProviding,
         cacheManager: SHCacheManager,
         logger: SHProcessingLogger,
@@ -25,6 +31,9 @@ final class SHPreprocessingPipeline {
         maxConcurrentWorkers: Int,
         preprocessingSignature: String = ""
     ) {
+        self.converter = converter
+        self.officeConversionEnabled = officeConversionEnabled
+        self.popplerPDFTextEnabled = popplerPDFTextEnabled
         self.ocrProvider = ocrProvider
         self.cacheManager = cacheManager
         self.logger = logger
@@ -113,7 +122,7 @@ final class SHPreprocessingPipeline {
         await logger.log(file: fileURL.lastPathComponent, phase: "CACHE", message: "miss")
 
         let parseStart = Date()
-        let parsed = parseText(from: fileURL)
+        let parsed = await parseText(from: fileURL)
         await benchmark.addTextExtraction(durationMs: Date().timeIntervalSince(parseStart) * 1000.0, pages: parsed.pageCount)
 
         let rawPages: [String]
@@ -166,11 +175,22 @@ final class SHPreprocessingPipeline {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    private func parseText(from fileURL: URL) -> SHPDFParseResult {
-        if fileURL.pathExtension.lowercased() == "pdf" {
-            return parser.parse(fileURL)
+    private func parseText(from fileURL: URL) async -> SHPDFParseResult {
+        let ext = fileURL.pathExtension.lowercased()
+        let officeExtension = SHDocumentConverter.pandocExtensions.contains(ext)
+
+        // converter zkus jen když je relevantní a povolený
+        let converterAllowed = (officeExtension && officeConversionEnabled)
+            || (ext == "pdf" && popplerPDFTextEnabled)
+        if converterAllowed,
+           let converted = await converter.convert(fileURL: fileURL, popplerPDFTextEnabled: popplerPDFTextEnabled) {
+            return converted
         }
 
+        // nativní cesta (beze změny)
+        if ext == "pdf" {
+            return parser.parse(fileURL)
+        }
         guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
             return SHPDFParseResult(rawPages: [], hasTextLayer: false, pageCount: 0)
         }
