@@ -47,4 +47,17 @@ import Testing
         #expect(SHToolRegistry.parseVersion(from: "pdftotext version 24.04.0") == "24.04.0")
         #expect(SHToolRegistry.parseVersion(from: "no version here") == nil)
     }
+
+    @Test func converterRoutingByExtension() {
+        func route(_ name: String, poppler: Bool = false) -> SHDocumentConverter.Route {
+            SHDocumentConverter.route(for: URL(fileURLWithPath: "/tmp/\(name)"), popplerPDFTextEnabled: poppler)
+        }
+        #expect(route("a.docx") == .pandoc)
+        #expect(route("a.ODT") == .pandoc)
+        #expect(route("a.epub") == .pandoc)
+        #expect(route("a.pdf") == .native)                       // default: PDFKit
+        #expect(route("a.pdf", poppler: true) == .popplerText)   // opt-in
+        #expect(route("a.txt") == .native)
+        #expect(route("a.csv") == .native)
+    }
 }
