@@ -33,4 +33,12 @@ import Testing
         #expect(runtime.resolve(.pdfinfo)?.path == inPath.path)
         #expect(runtime.resolve(.pdftotext) == nil)
     }
+
+    @Test func runtimeRunsPandocVersionWhenAvailable() async throws {
+        let runtime = SHToolRuntime()
+        guard runtime.resolve(.pandoc) != nil else { return } // přeskoč, není-li pandoc
+        let result = try await runtime.run(.pandoc, arguments: ["--version"], timeout: 30)
+        #expect(result.exitCode == 0)
+        #expect(result.stdoutString.lowercased().contains("pandoc"))
+    }
 }

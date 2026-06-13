@@ -34,4 +34,57 @@ struct SHToolRuntime: Sendable {
         let raw = ProcessInfo.processInfo.environment["PATH"] ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
         return raw.split(separator: ":").map { URL(fileURLWithPath: String($0), isDirectory: true) }
     }
+
+    func run(
+        _ tool: SHTool,
+        arguments: [String],
+        stdin: Data? = nil,
+        timeout: TimeInterval = 120
+    ) async throws -> SHToolResult {
+        guard let executable = resolve(tool) else { throw SHToolError.notFound(tool) }
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<SHToolResult, Error>) in
+                let process = Process()
+                process.executableURL = executable
+                process.arguments = arguments
+
+                let outPipe = Pipe(); let errPipe = Pipe()
+                process.standardOutput = outPipe
+                process.standardError = errPipe
+                let inPipe = Pipe()
+                if stdin != nil { process.standardInput = inPipe }
+
+                let timeoutItem = DispatchWorkItem {
+                    if process.isRunning { process.terminate() }
+                }
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutItem)
+
+                process.terminationHandler = { proc in
+                    timeoutItem.cancel()
+                    let out = outPipe.fileHandleForReading.readDataToEndOfFile()
+                    let err = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    // SIGTERM z timeoutu => uncaughtSignal
+                    if proc.terminationReason == .uncaughtSignal {
+                        continuation.resume(throwing: SHToolError.timedOut(tool))
+                    } else {
+                        continuation.resume(returning: SHToolResult(exitCode: proc.terminationStatus, stdout: out, stderr: err))
+                    }
+                }
+
+                do {
+                    try process.run()
+                    if let stdin {
+                        inPipe.fileHandleForWriting.write(stdin)
+                        try? inPipe.fileHandleForWriting.close()
+                    }
+                } catch {
+                    timeoutItem.cancel()
+                    continuation.resume(throwing: error)
+                }
+            }
+        } onCancel: {
+            // nejlepší snaha: bez reference na proces mimo continuation nemáme co terminovat
+        }
+    }
 }
