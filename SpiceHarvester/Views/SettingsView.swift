@@ -12,6 +12,8 @@ struct SettingsView: View {
     /// the first matching tab so the user lands on relevant content
     /// without remembering which tab hosts which knob ("kde je throttle?").
     @State private var searchText: String = ""
+    @State private var pandocStatusText = "Zjišťuji…"
+    @State private var pdftotextStatusText = "Zjišťuji…"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -213,8 +215,46 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                Toggle(isOn: $vm.config.officeConversionEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Konverze office dokumentů (pandoc)")
+                        Text("DOCX, ODT, RTF, HTML, EPUB se převedou na text přes pandoc.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Toggle(isOn: $vm.config.popplerPDFTextEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Extrakce PDF textu přes pdftotext (-layout)")
+                        Text("Místo PDFKit použije pdftotext; lépe zachová sloupce a tabulky.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                LabeledContent("pandoc") {
+                    Text(pandocStatusText).foregroundStyle(.secondary)
+                }
+                LabeledContent("pdftotext") {
+                    Text(pdftotextStatusText).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Lokální nástroje")
+            } footer: {
+                Text("Nástroje běží lokálně. Pokud nejsou k dispozici, použije se nativní zpracování (PDFKit/Vision).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+        .onChange(of: vm.config.officeConversionEnabled) { _, _ in vm.persistAll() }
+        .onChange(of: vm.config.popplerPDFTextEnabled) { _, _ in vm.persistAll() }
+        .task {
+            let registry = SHToolRegistry()
+            pandocStatusText = Self.toolStatusLabel(await registry.status(for: .pandoc))
+            pdftotextStatusText = Self.toolStatusLabel(await registry.status(for: .pdftotext))
+        }
     }
 
     // MARK: – Cache
@@ -249,6 +289,13 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .onChange(of: vm.config.bypassInferenceCache) { _, _ in vm.persistAll() }
+    }
+
+    private static func toolStatusLabel(_ status: SHToolRegistry.Status) -> String {
+        switch status {
+        case .available(let version): return "k dispozici (\(version))"
+        case .missing: return "není v aplikaci"
+        }
     }
 
     /// Compact timeout label: "90 s" under a minute, "2 m 30 s" above.
@@ -297,7 +344,8 @@ private enum SettingsTab: CaseIterable, Identifiable {
         case .ocr:
             return [
                 "ocr", "vision", "vlm", "apple", "backend", "skenované",
-                "rozpoznání", "scan"
+                "rozpoznání", "scan", "pandoc", "pdftotext", "nástroje",
+                "konverze", "docx", "office"
             ]
         case .cache:
             return [
