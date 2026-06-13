@@ -49,9 +49,9 @@ xcodebuild build -project SpiceHarvester.xcodeproj -scheme SpiceHarvester \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20
 ```
 
-## Xcode target membership (platí pro KAŽDÝ nový `.swift` soubor)
+## Xcode target membership (ověřeno: NETŘEBA nic dělat)
 
-Nové soubory pod `SpiceHarvester/Services/` musí být přidány do targetu `SpiceHarvester`, jinak je `xcodebuild` nezkompiluje a `@testable import SpiceHarvester` je v testech neuvidí. Po vytvoření souboru ho přidej do targetu (v Xcode přetažením / „Add Files…", nebo editací `SpiceHarvester.xcodeproj/project.pbxproj`). Každý implementační krok níže, který vytváří soubor, na to znovu upozorní.
+Projekt používá `PBXFileSystemSynchronizedRootGroup` (Xcode 16, `objectVersion = 77`) pro `SpiceHarvester/` i `SpiceHarvesterTests/`, **bez membership exceptions**. To znamená: každý `.swift` soubor vložený do těchto složek je **automaticky** součástí příslušného targetu — žádná editace `SpiceHarvester.xcodeproj/project.pbxproj` není potřeba. Kroky níže proto soubory jen vytvářejí; `git add` na `project.pbxproj` je no-op (soubor se nemění) a lze ho vynechat.
 
 ## Mapa souborů
 
