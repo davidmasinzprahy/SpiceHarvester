@@ -43,17 +43,40 @@ struct SHToolRuntime: Sendable {
     ) async throws -> SHToolResult {
         guard let executable = resolve(tool) else { throw SHToolError.notFound(tool) }
 
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        let inPipe = Pipe()
+        if stdin != nil { process.standardInput = inPipe }
+
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<SHToolResult, Error>) in
-                let process = Process()
-                process.executableURL = executable
-                process.arguments = arguments
+                // Souběžné vyčerpávání rour na pozadí: bez toho by dítě, které zapíše
+                // víc než ~64 KB na stdout dřív, než skončí, zaplnilo buffer roury,
+                // zablokovalo se na write() a nikdy by nespustilo terminationHandler
+                // (deadlock při velkém výstupu pdftotext/pandoc).
+                let ioGroup = DispatchGroup()
+                let lock = NSLock()
+                var outData = Data()
+                var errData = Data()
 
-                let outPipe = Pipe(); let errPipe = Pipe()
-                process.standardOutput = outPipe
-                process.standardError = errPipe
-                let inPipe = Pipe()
-                if stdin != nil { process.standardInput = inPipe }
+                ioGroup.enter()
+                DispatchQueue.global().async {
+                    let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+                    lock.lock(); outData = data; lock.unlock()
+                    ioGroup.leave()
+                }
+                ioGroup.enter()
+                DispatchQueue.global().async {
+                    let data = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    lock.lock(); errData = data; lock.unlock()
+                    ioGroup.leave()
+                }
 
                 let timeoutItem = DispatchWorkItem {
                     if process.isRunning { process.terminate() }
@@ -62,13 +85,15 @@ struct SHToolRuntime: Sendable {
 
                 process.terminationHandler = { proc in
                     timeoutItem.cancel()
-                    let out = outPipe.fileHandleForReading.readDataToEndOfFile()
-                    let err = errPipe.fileHandleForReading.readDataToEndOfFile()
-                    // SIGTERM z timeoutu => uncaughtSignal
-                    if proc.terminationReason == .uncaughtSignal {
-                        continuation.resume(throwing: SHToolError.timedOut(tool))
-                    } else {
-                        continuation.resume(returning: SHToolResult(exitCode: proc.terminationStatus, stdout: out, stderr: err))
+                    // Počkej, až obě roury dočtou EOF (dítě zavřelo write konce při exitu),
+                    // teprve pak resume — zaručí kompletní stdout/stderr i u velkého výstupu.
+                    ioGroup.notify(queue: DispatchQueue.global()) {
+                        lock.lock(); let out = outData; let err = errData; lock.unlock()
+                        if proc.terminationReason == .uncaughtSignal {
+                            continuation.resume(throwing: SHToolError.timedOut(tool))
+                        } else {
+                            continuation.resume(returning: SHToolResult(exitCode: proc.terminationStatus, stdout: out, stderr: err))
+                        }
                     }
                 }
 
@@ -80,11 +105,15 @@ struct SHToolRuntime: Sendable {
                     }
                 } catch {
                     timeoutItem.cancel()
+                    // Uvolni drain vlákna: bez zavření write konců by readDataToEndOfFile čekalo navždy.
+                    try? outPipe.fileHandleForWriting.close()
+                    try? errPipe.fileHandleForWriting.close()
                     continuation.resume(throwing: error)
                 }
             }
         } onCancel: {
-            // nejlepší snaha: bez reference na proces mimo continuation nemáme co terminovat
+            // Zrušení Swift tasku ukončí proces; terminationHandler pak resume continuation.
+            if process.isRunning { process.terminate() }
         }
     }
 }
