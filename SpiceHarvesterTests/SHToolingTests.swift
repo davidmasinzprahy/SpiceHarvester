@@ -41,4 +41,10 @@ import Testing
         #expect(result.exitCode == 0)
         #expect(result.stdoutString.lowercased().contains("pandoc"))
     }
+
+    @Test func parseVersionExtractsSemverFromOutput() {
+        #expect(SHToolRegistry.parseVersion(from: "pandoc 3.1.9\nFeatures...") == "3.1.9")
+        #expect(SHToolRegistry.parseVersion(from: "pdftotext version 24.04.0") == "24.04.0")
+        #expect(SHToolRegistry.parseVersion(from: "no version here") == nil)
+    }
 }
