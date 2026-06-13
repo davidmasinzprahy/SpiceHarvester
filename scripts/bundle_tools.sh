@@ -23,8 +23,14 @@ bundle_one() {
 
 for t in pandoc pdftotext pdfinfo; do bundle_one "$t"; done
 
-# podepiš s hardened runtime, aby šly spustit pod sandboxem rodiče
-find "$HELPERS" -type f -perm -u+x -exec \
+# podepiš s hardened runtime, aby šly spustit pod sandboxem rodiče.
+# Nejdřív dylibs (nemají execute bit, ale i je musí hardened runtime ověřit),
+# teprve pak spustitelné nástroje.
+if [ -d "$LIBS" ]; then
+  find "$LIBS" -type f -name '*.dylib' -exec \
+    codesign --force --options runtime --timestamp=none -s "$SIGN_ID" {} \;
+fi
+find "$HELPERS" -maxdepth 1 -type f -perm -u+x -exec \
   codesign --force --options runtime --timestamp=none -s "$SIGN_ID" {} \;
 
 echo "Hotovo: nástroje v $HELPERS"
