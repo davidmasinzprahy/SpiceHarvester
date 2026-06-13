@@ -16,13 +16,14 @@ Spice Harvester projde složku s PDF soubory nebo jinými typy souborů, vytěž
 - práce s lokálními nebo LAN modely přes LM Studio, MLX nebo jiný OpenAI-kompatibilní backend
 - opakované běhy nad stejnými dokumenty díky cache
 - export výsledků pro další zpracování v Excelu, Numbers, databázích nebo skriptech
+- konverze office dokumentů (DOCX, ODT, RTF, HTML, EPUB) přes pandoc na text
 
 ## Jak funguje pipeline
 
 Zpracování má dvě fáze:
 
 1. **Předzpracování**  
-   Aplikace najde podporované dokumenty, spočítá jejich hash, vytěží text přes PDFKit, OCR nebo přímé čtení textu a uloží vyčištěný text do cache.
+   Aplikace najde podporované dokumenty, spočítá jejich hash a vytěží text — z PDF přes PDFKit (volitelně přes `pdftotext -layout`), z office dokumentů přes pandoc, ze skenů přes OCR, nebo přímým čtením textu — a uloží vyčištěný text do cache.
 
 2. **Extrakce**  
    Lokální nebo LAN AI model dostane vybraný kontext dokumentu a uživatelský prompt. Odpověď se uloží v původní podobě i v aplikačním výsledkovém formátu.

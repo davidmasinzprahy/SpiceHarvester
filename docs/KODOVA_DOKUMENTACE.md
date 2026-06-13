@@ -49,6 +49,16 @@ Kroky (dle režimu):
 
 Repair flow (volání LLM podruhé s kanonickým schématem) byl **odstraněn** — pro uživatelské custom prompty produkoval falešné kanonické záznamy a plýtval inferencí.
 
+## Konverzní vrstva (lokální CLI nástroje)
+
+Před předzpracováním běží konverzní vrstva, která normalizuje vstupní formáty na text:
+
+- `SHToolRuntime` — najde bundlovanou binárku v `<App>/Contents/Helpers/` (fallback na `PATH` ve vývoji) a spustí ji přes `Process` s timeoutem a souběžným vyčerpáváním stdout/stderr.
+- `SHToolRegistry` — zjistí dostupnost a verzi nástrojů; verze vstupují do cache signatury, takže změna nástroje invaliduje dotčené dokumenty.
+- `SHDocumentConverter` — routuje soubor podle přípony: office dokumenty (DOCX/ODT/RTF/HTML/EPUB) přes pandoc, volitelně PDF přes `pdftotext -layout`. Vrací `SHPDFParseResult`; při chybějícím nástroji vrací `nil` a pipeline použije nativní cestu (PDFKit/Vision/UTF-8).
+
+Binárky pandoc a poppler se do `.app/Contents/Helpers/` vkládají skriptem `scripts/bundle_tools.sh` (Xcode Run Script phase) a podepisují s hardened runtime, aby šly spustit pod App Sandboxem.
+
 ## 3. Režimy extrakce
 
 `SHExtractionMode`:
