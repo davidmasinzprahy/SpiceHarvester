@@ -2491,10 +2491,13 @@ final class SHAppViewModel {
 
             let ocrProvider = try makeOCRProvider()
             var preprocessSignature = preprocessingSignature()
-            if config.officeConversionEnabled || config.popplerPDFTextEnabled || config.spreadsheetConversionEnabled {
-                // Verze CLI nástrojů v signatuře: změna pandoc/pdftotext/in2csv invaliduje
-                // dotčené dokumenty. Počítá se jen když je konverze zapnutá.
-                let toolSignature = await SHToolRegistry().signatureComponent(for: [.pandoc, .pdftotext, .in2csv])
+            var signatureTools: [SHTool] = []
+            if config.officeConversionEnabled { signatureTools.append(.pandoc) }
+            if config.popplerPDFTextEnabled { signatureTools.append(.pdftotext) }
+            if config.spreadsheetConversionEnabled { signatureTools.append(.in2csv) }
+            if config.ocrBackend == .ocrmypdf { signatureTools.append(contentsOf: [.ocrmypdf, .tesseract]) }
+            if !signatureTools.isEmpty {
+                let toolSignature = await SHToolRegistry().signatureComponent(for: signatureTools)
                 preprocessSignature += "|tools:" + toolSignature
             }
             let pipeline = SHPreprocessingPipeline(
