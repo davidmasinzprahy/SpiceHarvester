@@ -171,6 +171,13 @@ import Testing
         #expect(doc.metadata.hasTextLayer == true)
     }
 
+    @Test func ocrToolNamesAndVersionArgs() {
+        #expect(SHTool.ocrmypdf.executableName == "ocrmypdf")
+        #expect(SHTool.tesseract.executableName == "tesseract")
+        #expect(SHTool.ocrmypdf.versionArguments == ["--version"])
+        #expect(SHTool.allCases.contains(.tesseract))
+    }
+
     @Test func pipelineAcceptsSpreadsheetFlagAndKeepsNativeForText() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("ss-\(UUID().uuidString)")
