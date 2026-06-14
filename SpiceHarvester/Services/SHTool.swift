@@ -5,6 +5,7 @@ enum SHTool: String, CaseIterable, Sendable {
     case pandoc
     case pdftotext
     case pdfinfo
+    case in2csv
 
     var executableName: String { rawValue }
     var versionArguments: [String] { ["--version"] }

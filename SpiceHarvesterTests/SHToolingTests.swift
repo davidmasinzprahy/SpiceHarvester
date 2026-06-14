@@ -103,6 +103,12 @@ import Testing
         #expect(decoded.popplerPDFTextEnabled == false)
     }
 
+    @Test func in2csvToolNameAndVersionArgs() {
+        #expect(SHTool.in2csv.executableName == "in2csv")
+        #expect(SHTool.in2csv.versionArguments == ["--version"])
+        #expect(SHTool.allCases.contains(.in2csv))
+    }
+
     @Test func pipelineUsesConverterThenFallsBackToNative() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("conv-\(UUID().uuidString)")
