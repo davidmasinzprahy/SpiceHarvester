@@ -61,6 +61,8 @@ Binárky pandoc a poppler se do `.app/Contents/Helpers/` vkládají skriptem `sc
 
 Tabulky `xlsx`/`xls` se převádějí na CSV přes `in2csv` (csvkit) — routa `.csvkit` v `SHDocumentConverter`. Protože `in2csv` je Python skript, packaging bundluje relokovatelný Python + csvkit a tenký wrapper přes `scripts/bundle_python_tools.sh`; cílová cesta je opět `Contents/Helpers/`.
 
+Skenovaná PDF (bez textové vrstvy) lze OCRovat lokálně přes `ocrmypdf` (tesseract + ghostscript) — `SHOcrmypdfProvider` implementuje `SHOCRProviding` a vybírá se OCR backendem `ocrmypdf`; při chybě nebo nedostupnosti nástroje se přes `SHFallbackOCRProvider` použije Apple Vision. Jazyky `ces+slk+deu+pol+eng`. Packaging bundluje ocrmypdf (do Pythonu), ghostscript (AGPL) a tesseract + `tessdata` přes `scripts/bundle_ocr_tools.sh`.
+
 ## 3. Režimy extrakce
 
 `SHExtractionMode`:

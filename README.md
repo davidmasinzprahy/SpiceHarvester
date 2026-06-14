@@ -24,7 +24,7 @@ Spice Harvester projde složku s PDF soubory nebo jinými typy souborů, vytěž
 Zpracování má dvě fáze:
 
 1. **Předzpracování**  
-   Aplikace najde podporované dokumenty, spočítá jejich hash a vytěží text — z PDF přes PDFKit (volitelně přes `pdftotext -layout`), z office dokumentů přes pandoc, ze skenů přes OCR, nebo přímým čtením textu — a uloží vyčištěný text do cache.
+   Aplikace najde podporované dokumenty, spočítá jejich hash a vytěží text — z PDF přes PDFKit (volitelně přes `pdftotext -layout`), z office dokumentů přes pandoc, ze skenů přes OCR, nebo přímým čtením textu — a uloží vyčištěný text do cache. Skenovaná PDF bez textové vrstvy lze OCRovat lokálně volitelným backendem ocrmypdf (tesseract).
 
 2. **Extrakce**  
    Lokální nebo LAN AI model dostane vybraný kontext dokumentu a uživatelský prompt. Odpověď se uloží v původní podobě i v aplikačním výsledkovém formátu.
