@@ -109,6 +109,31 @@ import Testing
         #expect(SHTool.allCases.contains(.in2csv))
     }
 
+    @Test func converterRoutesSpreadsheetsToCsvkit() {
+        func route(_ name: String) -> SHDocumentConverter.Route {
+            SHDocumentConverter.route(for: URL(fileURLWithPath: "/tmp/\(name)"), popplerPDFTextEnabled: false)
+        }
+        #expect(route("a.xlsx") == .csvkit)
+        #expect(route("a.XLS") == .csvkit)
+        #expect(route("a.csv") == .native)   // čisté CSV zůstává nativní
+        #expect(route("a.docx") == .pandoc)  // beze změny
+    }
+
+    // Integrační test: vytvořit binární XLSX ze Swiftu je netriviální, proto se spustí
+    // jen když existuje fixture na disku a in2csv je dostupný; jinak se přeskočí.
+    @Test func converterConvertsXlsxWhenAvailable() async throws {
+        let converter = SHDocumentConverter()
+        guard converter.runtime.resolve(.in2csv) != nil else { return }
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/sample.xlsx")
+        guard FileManager.default.fileExists(atPath: fixture.path) else { return }
+
+        let result = try #require(await converter.convert(fileURL: fixture, popplerPDFTextEnabled: false))
+        #expect(result.hasTextLayer == true)
+        #expect(result.pageCount == 1)
+    }
+
     @Test func pipelineUsesConverterThenFallsBackToNative() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("conv-\(UUID().uuidString)")
