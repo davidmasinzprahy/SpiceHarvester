@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var searchText: String = ""
     @State private var pandocStatusText = "Zjišťuji…"
     @State private var pdftotextStatusText = "Zjišťuji…"
+    @State private var in2csvStatusText = "Zjišťuji…"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -233,11 +234,22 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Toggle(isOn: $vm.config.spreadsheetConversionEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Konverze tabulek (XLSX/XLS) přes csvkit")
+                        Text("Tabulky se převedou na CSV přes in2csv.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 LabeledContent("pandoc") {
                     Text(pandocStatusText).foregroundStyle(.secondary)
                 }
                 LabeledContent("pdftotext") {
                     Text(pdftotextStatusText).foregroundStyle(.secondary)
+                }
+                LabeledContent("in2csv") {
+                    Text(in2csvStatusText).foregroundStyle(.secondary)
                 }
             } header: {
                 Text("Lokální nástroje")
@@ -250,10 +262,12 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .onChange(of: vm.config.officeConversionEnabled) { _, _ in vm.persistAll() }
         .onChange(of: vm.config.popplerPDFTextEnabled) { _, _ in vm.persistAll() }
+        .onChange(of: vm.config.spreadsheetConversionEnabled) { _, _ in vm.persistAll() }
         .task {
             let registry = SHToolRegistry()
             pandocStatusText = Self.toolStatusLabel(await registry.status(for: .pandoc))
             pdftotextStatusText = Self.toolStatusLabel(await registry.status(for: .pdftotext))
+            in2csvStatusText = Self.toolStatusLabel(await registry.status(for: .in2csv))
         }
     }
 
@@ -345,7 +359,8 @@ private enum SettingsTab: CaseIterable, Identifiable {
             return [
                 "ocr", "vision", "vlm", "apple", "backend", "skenované",
                 "rozpoznání", "scan", "pandoc", "pdftotext", "nástroje",
-                "konverze", "docx", "office"
+                "konverze", "docx", "office", "csvkit", "in2csv", "xlsx",
+                "tabulky", "excel"
             ]
         case .cache:
             return [
