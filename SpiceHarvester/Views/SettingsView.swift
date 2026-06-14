@@ -15,6 +15,8 @@ struct SettingsView: View {
     @State private var pandocStatusText = "Zjišťuji…"
     @State private var pdftotextStatusText = "Zjišťuji…"
     @State private var in2csvStatusText = "Zjišťuji…"
+    @State private var ocrmypdfStatusText = "Zjišťuji…"
+    @State private var tesseractStatusText = "Zjišťuji…"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -212,7 +214,7 @@ struct SettingsView: View {
             } header: {
                 Text("OCR backend")
             } footer: {
-                Text("Apple Vision běží lokálně bez AI serveru. oMLX/VLM posílá skenované PDF stránky do vybraného OCR/VLM modelu přes OpenAI-compatible chat completions. Vision→VLM zkusí nejdřív Vision a teprve pokud neuspěje, sáhne po VLM.")
+                Text("Apple Vision běží lokálně bez AI serveru. oMLX/VLM posílá skenované PDF stránky do vybraného OCR/VLM modelu přes OpenAI-compatible chat completions. Vision→VLM zkusí nejdřív Vision a teprve pokud neuspěje, sáhne po VLM. ocrmypdf je lokální OCR přes tesseract bez AI serveru; když není k dispozici, použije se Apple Vision.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -251,6 +253,12 @@ struct SettingsView: View {
                 LabeledContent("in2csv") {
                     Text(in2csvStatusText).foregroundStyle(.secondary)
                 }
+                LabeledContent("ocrmypdf") {
+                    Text(ocrmypdfStatusText).foregroundStyle(.secondary)
+                }
+                LabeledContent("tesseract") {
+                    Text(tesseractStatusText).foregroundStyle(.secondary)
+                }
             } header: {
                 Text("Lokální nástroje")
             } footer: {
@@ -268,6 +276,8 @@ struct SettingsView: View {
             pandocStatusText = Self.toolStatusLabel(await registry.status(for: .pandoc))
             pdftotextStatusText = Self.toolStatusLabel(await registry.status(for: .pdftotext))
             in2csvStatusText = Self.toolStatusLabel(await registry.status(for: .in2csv))
+            ocrmypdfStatusText = Self.toolStatusLabel(await registry.status(for: .ocrmypdf))
+            tesseractStatusText = Self.toolStatusLabel(await registry.status(for: .tesseract))
         }
     }
 
@@ -360,7 +370,7 @@ private enum SettingsTab: CaseIterable, Identifiable {
                 "ocr", "vision", "vlm", "apple", "backend", "skenované",
                 "rozpoznání", "scan", "pandoc", "pdftotext", "nástroje",
                 "konverze", "docx", "office", "csvkit", "in2csv", "xlsx",
-                "xls", "tabulky", "excel"
+                "xls", "tabulky", "excel", "ocrmypdf", "tesseract", "sken"
             ]
         case .cache:
             return [
