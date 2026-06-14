@@ -29,6 +29,8 @@ enum SHOCRBackend: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Try Apple Vision first and use OpenAI-compatible VLM/OCR only when Vision
     /// returns no usable text.
     case appleVisionThenOpenAI
+    /// Lokální OCR přes ocrmypdf (tesseract). Fallback na Apple Vision při chybě.
+    case ocrmypdf
 
     var id: String { rawValue }
 
@@ -37,6 +39,7 @@ enum SHOCRBackend: String, Codable, CaseIterable, Identifiable, Sendable {
         case .appleVision: return "Apple Vision"
         case .openAIVision: return "oMLX/VLM"
         case .appleVisionThenOpenAI: return "Vision→VLM"
+        case .ocrmypdf: return "ocrmypdf"
         }
     }
 }

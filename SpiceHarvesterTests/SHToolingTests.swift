@@ -220,4 +220,12 @@ import Testing
         let pages = try await provider.extractText(from: URL(fileURLWithPath: "/tmp/none-\(UUID().uuidString).pdf"))
         #expect(pages.isEmpty)
     }
+
+    @Test func ocrBackendOcrmypdfExposesTitleAndIsCodable() throws {
+        #expect(SHOCRBackend.ocrmypdf.title == "ocrmypdf")
+        #expect(SHOCRBackend.allCases.contains(.ocrmypdf))
+        let data = try JSONEncoder().encode(SHOCRBackend.ocrmypdf)
+        let decoded = try JSONDecoder().decode(SHOCRBackend.self, from: data)
+        #expect(decoded == .ocrmypdf)
+    }
 }

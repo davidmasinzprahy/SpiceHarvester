@@ -2752,6 +2752,8 @@ final class SHAppViewModel {
             }
             let fallback = SHOpenAIVisionOCRProvider(client: lmClient, server: server, model: model)
             return SHFallbackOCRProvider(primary: SHVisionOCRProvider(), fallback: fallback)
+        case .ocrmypdf:
+            return SHFallbackOCRProvider(primary: SHOcrmypdfProvider(), fallback: SHVisionOCRProvider())
         }
     }
 
@@ -2763,6 +2765,8 @@ final class SHAppViewModel {
             return "ocr=openAIVision;model=\(config.selectedOCRModel)"
         case .appleVisionThenOpenAI:
             return "ocr=appleVisionThenOpenAI;model=\(config.selectedOCRModel)"
+        case .ocrmypdf:
+            return "ocr=ocrmypdf"
         }
     }
 
