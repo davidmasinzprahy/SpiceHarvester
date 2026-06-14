@@ -170,4 +170,32 @@ import Testing
         #expect(doc.cleanedText.contains("Pacient Jan"))
         #expect(doc.metadata.hasTextLayer == true)
     }
+
+    @Test func pipelineAcceptsSpreadsheetFlagAndKeepsNativeForText() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("ss-\(UUID().uuidString)")
+        let cacheRoot = fm.temporaryDirectory.appendingPathComponent("ss-cache-\(UUID().uuidString)")
+        let logRoot = fm.temporaryDirectory.appendingPathComponent("ss-log-\(UUID().uuidString)")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        try fm.createDirectory(at: logRoot, withIntermediateDirectories: true)
+        defer { for u in [root, cacheRoot, logRoot] { try? fm.removeItem(at: u) } }
+
+        try "Pacient Jan".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+
+        let pipeline = SHPreprocessingPipeline(
+            converter: SHDocumentConverter(),
+            officeConversionEnabled: false,
+            popplerPDFTextEnabled: false,
+            spreadsheetConversionEnabled: true,
+            ocrProvider: NoopOCRProvider(),
+            cacheManager: SHCacheManager(cacheRoot: cacheRoot),
+            logger: SHProcessingLogger(logFileURL: logRoot.appendingPathComponent("p.log")),
+            benchmark: SHBenchmarkService(),
+            maxConcurrentWorkers: 1
+        )
+
+        let output = await pipeline.run(inputFolder: root, onCounters: { _ in })
+        let doc = try #require(output.cachedDocuments.first)
+        #expect(doc.cleanedText.contains("Pacient Jan"))
+    }
 }

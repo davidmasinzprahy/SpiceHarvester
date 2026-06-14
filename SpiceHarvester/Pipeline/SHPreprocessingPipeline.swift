@@ -13,6 +13,7 @@ final class SHPreprocessingPipeline {
     private let converter: SHDocumentConverter
     private let officeConversionEnabled: Bool
     private let popplerPDFTextEnabled: Bool
+    private let spreadsheetConversionEnabled: Bool
     private let ocrProvider: SHOCRProviding
     private let cacheManager: SHCacheManager
     private let logger: SHProcessingLogger
@@ -24,6 +25,7 @@ final class SHPreprocessingPipeline {
         converter: SHDocumentConverter = SHDocumentConverter(),
         officeConversionEnabled: Bool = false,
         popplerPDFTextEnabled: Bool = false,
+        spreadsheetConversionEnabled: Bool = false,
         ocrProvider: SHOCRProviding,
         cacheManager: SHCacheManager,
         logger: SHProcessingLogger,
@@ -34,6 +36,7 @@ final class SHPreprocessingPipeline {
         self.converter = converter
         self.officeConversionEnabled = officeConversionEnabled
         self.popplerPDFTextEnabled = popplerPDFTextEnabled
+        self.spreadsheetConversionEnabled = spreadsheetConversionEnabled
         self.ocrProvider = ocrProvider
         self.cacheManager = cacheManager
         self.logger = logger
@@ -178,10 +181,12 @@ final class SHPreprocessingPipeline {
     private func parseText(from fileURL: URL) async -> SHPDFParseResult {
         let ext = fileURL.pathExtension.lowercased()
         let officeExtension = SHDocumentConverter.pandocExtensions.contains(ext)
+        let spreadsheetExtension = SHDocumentConverter.csvkitExtensions.contains(ext)
 
         // converter zkus jen když je relevantní a povolený
         let converterAllowed = (officeExtension && officeConversionEnabled)
             || (ext == "pdf" && popplerPDFTextEnabled)
+            || (spreadsheetExtension && spreadsheetConversionEnabled)
         if converterAllowed,
            let converted = await converter.convert(fileURL: fileURL, popplerPDFTextEnabled: popplerPDFTextEnabled) {
             return converted
