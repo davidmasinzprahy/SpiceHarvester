@@ -205,4 +205,19 @@ import Testing
         let doc = try #require(output.cachedDocuments.first)
         #expect(doc.cleanedText.contains("Pacient Jan"))
     }
+
+    @Test func ocrmypdfParsesSidecarPagesOnFormFeed() {
+        let text = "Strana 1\u{0C}Strana 2\u{0C}Strana 3"
+        let pages = SHOcrmypdfProvider.parseSidecarPages(text)
+        #expect(pages.count == 3)
+        #expect(pages[1] == "Strana 2")
+    }
+
+    @Test func ocrmypdfProviderReturnsEmptyWhenToolMissing() async throws {
+        // runtime bez helpers i PATH -> resolve(.ocrmypdf) == nil
+        let runtime = SHToolRuntime(helpersDirectory: nil, pathDirectories: [])
+        let provider = SHOcrmypdfProvider(runtime: runtime)
+        let pages = try await provider.extractText(from: URL(fileURLWithPath: "/tmp/none-\(UUID().uuidString).pdf"))
+        #expect(pages.isEmpty)
+    }
 }
