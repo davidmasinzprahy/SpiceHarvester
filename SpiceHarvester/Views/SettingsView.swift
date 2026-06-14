@@ -360,7 +360,7 @@ private enum SettingsTab: CaseIterable, Identifiable {
                 "ocr", "vision", "vlm", "apple", "backend", "skenované",
                 "rozpoznání", "scan", "pandoc", "pdftotext", "nástroje",
                 "konverze", "docx", "office", "csvkit", "in2csv", "xlsx",
-                "tabulky", "excel"
+                "xls", "tabulky", "excel"
             ]
         case .cache:
             return [

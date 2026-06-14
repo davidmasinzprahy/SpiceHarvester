@@ -27,8 +27,11 @@ if [ ! -x "$PYDIR/bin/python3" ]; then
   rm -rf "$tmp"
 fi
 
-# 2) Nainstaluj csvkit do bundlovaného Pythonu
-"$PYDIR/bin/python3" -m pip install --upgrade --no-warn-script-location csvkit
+# 2) Nainstaluj csvkit do bundlovaného Pythonu (jen pokud ještě není — šetří síť
+#    při opakovaných buildech)
+if ! "$PYDIR/bin/python3" -c "import csvkit" >/dev/null 2>&1; then
+  "$PYDIR/bin/python3" -m pip install --no-warn-script-location csvkit
+fi
 
 # 3) Tenký wrapper: shebang nemůže být @executable_path, proto wrapper přes bash
 cat > "$HELPERS/in2csv" <<'WRAP'

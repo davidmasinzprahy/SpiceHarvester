@@ -18,7 +18,7 @@ struct SHFileScanService {
         "html",
         "htm",
         "epub",
-        // tabulky (csvkit, Fáze 2 — sken už je hledá, konverze přijde s Fází 2)
+        // tabulky (csvkit / in2csv, Fáze 2)
         "xlsx",
         "xls"
     ]
