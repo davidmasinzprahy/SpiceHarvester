@@ -124,6 +124,8 @@ struct SHAppConfig: Codable, Sendable {
     var officeConversionEnabled: Bool = true
     /// Extrakce textu z PDF přes `pdftotext -layout` místo PDFKit. Default vypnuto (opt-in).
     var popplerPDFTextEnabled: Bool = false
+    /// Konverze tabulek (XLSX/XLS) na CSV přes csvkit (in2csv). Default zapnuto.
+    var spreadsheetConversionEnabled: Bool = true
 
     init() {}
 
@@ -136,6 +138,7 @@ struct SHAppConfig: Codable, Sendable {
         case modelContextTokens, bypassInferenceCache, requestTimeoutSeconds
         case lastRunAvgDocumentMs, lastRunAvgPageMs
         case officeConversionEnabled, popplerPDFTextEnabled
+        case spreadsheetConversionEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -165,5 +168,6 @@ struct SHAppConfig: Codable, Sendable {
         lastRunAvgPageMs = try c.decodeIfPresent(Double.self, forKey: .lastRunAvgPageMs) ?? 0
         officeConversionEnabled = try c.decodeIfPresent(Bool.self, forKey: .officeConversionEnabled) ?? true
         popplerPDFTextEnabled = try c.decodeIfPresent(Bool.self, forKey: .popplerPDFTextEnabled) ?? false
+        spreadsheetConversionEnabled = try c.decodeIfPresent(Bool.self, forKey: .spreadsheetConversionEnabled) ?? true
     }
 }

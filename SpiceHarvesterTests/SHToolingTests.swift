@@ -134,6 +134,14 @@ import Testing
         #expect(result.pageCount == 1)
     }
 
+    @Test func appConfigSpreadsheetDefaultAndRoundtrip() throws {
+        let config = SHAppConfig()
+        #expect(config.spreadsheetConversionEnabled == true)
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(SHAppConfig.self, from: data)
+        #expect(decoded.spreadsheetConversionEnabled == true)
+    }
+
     @Test func pipelineUsesConverterThenFallsBackToNative() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("conv-\(UUID().uuidString)")
