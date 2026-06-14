@@ -228,4 +228,16 @@ import Testing
         let decoded = try JSONDecoder().decode(SHOCRBackend.self, from: data)
         #expect(decoded == .ocrmypdf)
     }
+
+    @Test func fallbackOCRUsesFallbackWhenPrimaryReturnsEmpty() async throws {
+        struct EmptyOCR: SHOCRProviding {
+            func extractText(from fileURL: URL) async throws -> [String] { [] }
+        }
+        struct TextOCR: SHOCRProviding {
+            func extractText(from fileURL: URL) async throws -> [String] { ["text z Vision"] }
+        }
+        let provider = SHFallbackOCRProvider(primary: EmptyOCR(), fallback: TextOCR())
+        let pages = try await provider.extractText(from: URL(fileURLWithPath: "/tmp/x-\(UUID().uuidString).pdf"))
+        #expect(pages == ["text z Vision"])
+    }
 }

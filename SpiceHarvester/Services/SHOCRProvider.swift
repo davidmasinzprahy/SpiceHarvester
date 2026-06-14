@@ -139,7 +139,7 @@ final class SHFallbackOCRProvider: SHOCRProviding, Sendable {
     func extractText(from fileURL: URL) async throws -> [String] {
         let primaryPages = try await primary.extractText(from: fileURL)
 
-        let needsFallback = primaryPages.contains { page in
+        let needsFallback = primaryPages.isEmpty || primaryPages.contains { page in
             page.trimmingCharacters(in: .whitespacesAndNewlines).count < minimumUsableCharacters
         }
         guard needsFallback else {
