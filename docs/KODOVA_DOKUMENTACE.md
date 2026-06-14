@@ -59,6 +59,8 @@ Před předzpracováním běží konverzní vrstva, která normalizuje vstupní 
 
 Binárky pandoc a poppler se do `.app/Contents/Helpers/` vkládají skriptem `scripts/bundle_tools.sh` (Xcode Run Script phase) a podepisují s hardened runtime, aby šly spustit pod App Sandboxem.
 
+Tabulky `xlsx`/`xls` se převádějí na CSV přes `in2csv` (csvkit) — routa `.csvkit` v `SHDocumentConverter`. Protože `in2csv` je Python skript, packaging bundluje relokovatelný Python + csvkit a tenký wrapper přes `scripts/bundle_python_tools.sh`; cílová cesta je opět `Contents/Helpers/`.
+
 ## 3. Režimy extrakce
 
 `SHExtractionMode`:

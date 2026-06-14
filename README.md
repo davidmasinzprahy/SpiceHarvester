@@ -17,6 +17,7 @@ Spice Harvester projde složku s PDF soubory nebo jinými typy souborů, vytěž
 - opakované běhy nad stejnými dokumenty díky cache
 - export výsledků pro další zpracování v Excelu, Numbers, databázích nebo skriptech
 - konverze office dokumentů (DOCX, ODT, RTF, HTML, EPUB) přes pandoc na text
+- konverze tabulek (XLSX, XLS) na CSV přes csvkit
 
 ## Jak funguje pipeline
 
