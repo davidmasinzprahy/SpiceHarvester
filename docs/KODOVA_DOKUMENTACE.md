@@ -63,6 +63,8 @@ Tabulky `xlsx`/`xls` se převádějí na CSV přes `in2csv` (csvkit) — routa `
 
 Skenovaná PDF (bez textové vrstvy) lze OCRovat lokálně přes `ocrmypdf` (tesseract + ghostscript) — `SHOcrmypdfProvider` implementuje `SHOCRProviding` a vybírá se OCR backendem `ocrmypdf`; při chybě nebo nedostupnosti nástroje se přes `SHFallbackOCRProvider` použije Apple Vision. Jazyky `ces+slk+deu+pol+eng`. Packaging bundluje ocrmypdf (do Pythonu), ghostscript (AGPL) a tesseract + `tessdata` přes `scripts/bundle_ocr_tools.sh`.
 
+Instalace nástrojů (Homebrew) a zapojení packagingu do Xcode je popsané v [Lokální nástroje](LOKALNI_NASTROJE.md).
+
 ## 3. Režimy extrakce
 
 `SHExtractionMode`:

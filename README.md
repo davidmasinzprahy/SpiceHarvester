@@ -49,6 +49,8 @@ Výchozí režim aplikace je **SEARCH**.
   - vzdálený server v LAN, např. SPARK DGX
   - Ollama, vLLM, llama.cpp nebo LocalAI s kompatibilním API
 
+Volitelně (pro rozšířené vstupy a OCR) lokální CLI nástroje — pandoc, poppler, csvkit, ocrmypdf, tesseract. Jsou nepovinné; bez nich aplikace spadne zpět na nativní zpracování. Instalace a bundlování: [Lokální nástroje](docs/LOKALNI_NASTROJE.md).
+
 ## Rychlý start
 
 1. Spusť lokální nebo LAN AI server a načti model.
@@ -91,6 +93,7 @@ Pozor: API klíče jsou zatím uložené v UserDefaults jako plaintext. Migrace 
 |---|---|
 | [Uživatelská nápověda](docs/NAPOVEDA_UZIVATEL.md) | Použití aplikace krok za krokem |
 | [Technická dokumentace](docs/KODOVA_DOKUMENTACE.md) | Architektura, pipeline, cache, persistence |
+| [Lokální nástroje](docs/LOKALNI_NASTROJE.md) | Instalace a bundlování pandoc / poppler / csvkit / ocrmypdf / tesseract |
 | [Výkon a cache](docs/VYKON_A_CACHE.md) | Nastavení výkonu a chování cache |
 | [Klávesové zkratky](docs/KLÁVESOVÉ_ZKRATKY.md) | Přehled zkratek |
 | [Práce s prompty](docs/PROMPT_TXT_NAVOD.md) | Doporučený formát promptů |
