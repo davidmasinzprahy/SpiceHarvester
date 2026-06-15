@@ -51,8 +51,9 @@ struct SHToolRuntime: Sendable {
         let errPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
-        let inPipe = Pipe()
-        if stdin != nil { process.standardInput = inPipe }
+        // Vstupní rouru alokuj jen když opravdu posíláme stdin (jinak zbytečné FD).
+        let inPipe: Pipe? = stdin != nil ? Pipe() : nil
+        if let inPipe { process.standardInput = inPipe }
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<SHToolResult, Error>) in
@@ -99,7 +100,7 @@ struct SHToolRuntime: Sendable {
 
                 do {
                     try process.run()
-                    if let stdin {
+                    if let stdin, let inPipe {
                         inPipe.fileHandleForWriting.write(stdin)
                         try? inPipe.fileHandleForWriting.close()
                     }

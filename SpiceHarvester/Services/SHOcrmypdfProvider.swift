@@ -34,7 +34,11 @@ final class SHOcrmypdfProvider: SHOCRProviding, Sendable {
     }
 
     /// Čistá funkce: sidecar text dělí na stránky podle form-feed `\u{0C}`.
+    /// ocrmypdf přidává form-feed za každou stránku, takže poslední prvek po splitu
+    /// je prázdný; zahodíme ho, jinak prázdná „stránka" zbytečně spustí fallback OCR.
     static func parseSidecarPages(_ text: String) -> [String] {
-        text.components(separatedBy: "\u{0C}")
+        var pages = text.components(separatedBy: "\u{0C}")
+        if pages.last?.isEmpty == true { pages.removeLast() }
+        return pages
     }
 }

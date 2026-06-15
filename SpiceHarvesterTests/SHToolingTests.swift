@@ -213,6 +213,13 @@ import Testing
         #expect(pages[1] == "Strana 2")
     }
 
+    @Test func ocrmypdfDropsTrailingEmptyPageFromTrailingFormFeed() {
+        // ocrmypdf přidává form-feed i za poslední stránku → koncový prázdný prvek
+        // se musí zahodit, jinak by spustil zbytečný fallback OCR.
+        let pages = SHOcrmypdfProvider.parseSidecarPages("Strana 1\u{0C}Strana 2\u{0C}")
+        #expect(pages == ["Strana 1", "Strana 2"])
+    }
+
     @Test func ocrmypdfProviderReturnsEmptyWhenToolMissing() async throws {
         // runtime bez helpers i PATH -> resolve(.ocrmypdf) == nil
         let runtime = SHToolRuntime(helpersDirectory: nil, pathDirectories: [])

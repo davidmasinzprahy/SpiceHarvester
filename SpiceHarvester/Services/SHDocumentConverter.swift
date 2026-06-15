@@ -44,18 +44,19 @@ struct SHDocumentConverter: Sendable {
     }
 
     private func runPandoc(_ fileURL: URL) async -> SHPDFParseResult? {
-        guard runtime.resolve(.pandoc) != nil else { return nil }
-        guard let result = try? await runtime.run(.pandoc, arguments: ["-t", "plain", fileURL.path], timeout: 120),
-              result.exitCode == 0 else { return nil }
-        let text = result.stdoutString
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return SHPDFParseResult(rawPages: [text], hasTextLayer: !trimmed.isEmpty, pageCount: 1)
+        await runSinglePage(.pandoc, arguments: ["-t", "plain", fileURL.path])
     }
 
     private func runIn2csv(_ fileURL: URL) async -> SHPDFParseResult? {
-        guard runtime.resolve(.in2csv) != nil else { return nil }
         // in2csv detekuje formát podle přípony a píše CSV na stdout
-        guard let result = try? await runtime.run(.in2csv, arguments: [fileURL.path], timeout: 120),
+        await runSinglePage(.in2csv, arguments: [fileURL.path])
+    }
+
+    /// Spustí nástroj, jehož celý stdout tvoří jedinou „stránku" textu (pandoc, in2csv).
+    /// Vrátí `nil` pro chybějící nástroj nebo nenulový exit (→ nativní fallback).
+    private func runSinglePage(_ tool: SHTool, arguments: [String]) async -> SHPDFParseResult? {
+        guard runtime.resolve(tool) != nil else { return nil }
+        guard let result = try? await runtime.run(tool, arguments: arguments, timeout: 120),
               result.exitCode == 0 else { return nil }
         let text = result.stdoutString
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -67,7 +68,10 @@ struct SHDocumentConverter: Sendable {
         // `-layout` zachová sloupce; `-` posílá výstup na stdout
         guard let result = try? await runtime.run(.pdftotext, arguments: ["-layout", fileURL.path, "-"], timeout: 120),
               result.exitCode == 0 else { return nil }
-        let pages = result.stdoutString.components(separatedBy: "\u{0C}")
+        // pdftotext přidává form-feed ZA každou stránku (i za poslední), takže poslední
+        // prvek po splitu je prázdný; zahodíme ho, jinak je pageCount o 1 vyšší.
+        var pages = result.stdoutString.components(separatedBy: "\u{0C}")
+        if pages.last?.isEmpty == true { pages.removeLast() }
         let nonEmpty = pages.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return SHPDFParseResult(rawPages: pages, hasTextLayer: nonEmpty, pageCount: pages.count)
     }

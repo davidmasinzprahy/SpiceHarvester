@@ -17,6 +17,8 @@ struct SettingsView: View {
     @State private var in2csvStatusText = "Zjišťuji…"
     @State private var ocrmypdfStatusText = "Zjišťuji…"
     @State private var tesseractStatusText = "Zjišťuji…"
+    /// Stav nástrojů probneme jen jednou za sezení, ne při každém zobrazení OCR tabu.
+    @State private var toolStatusProbed = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -272,6 +274,10 @@ struct SettingsView: View {
         .onChange(of: vm.config.popplerPDFTextEnabled) { _, _ in vm.persistAll() }
         .onChange(of: vm.config.spreadsheetConversionEnabled) { _, _ in vm.persistAll() }
         .task {
+            // Stav nástrojů se v rámci sezení nemění; probni `--version` jen jednou,
+            // ne při každém přepnutí zpět na OCR tab (5 podprocesů pokaždé).
+            guard !toolStatusProbed else { return }
+            toolStatusProbed = true
             let registry = SHToolRegistry()
             pandocStatusText = Self.toolStatusLabel(await registry.status(for: .pandoc))
             pdftotextStatusText = Self.toolStatusLabel(await registry.status(for: .pdftotext))
