@@ -12,7 +12,7 @@ implementace, scope a očekávaný čas. Slouží jako vstup pro budoucí ticket
 | AppIntents pro Shortcuts | ✅ Hotovo + parametry + wait + targetFolder + tab activation + structured return |
 | Save / Load Project commands (interim za DocumentGroup) | ✅ Hotovo |
 | Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo + per-tab title/server + collision detection + Help window scene |
-| Quick Look provider source + target | ✅ Hotovo (`SpiceHarvesterQuickLook` extension target, `SHQuickLookPreview.swift` source) |
+| Quick Look provider — zdroj + UTI/export | ✅ Zdroj `SHQuickLookPreview.swift` (guarded) + UTI/export `.spice-result.json` hotové; **Xcode extension target chybí** (#1 níže) |
 | Plný DocumentGroup s file-based persistencí | 📋 3-day refactor (#3 níže) |
 | iCloud Drive sync | 📋 Vyžaduje Apple Dev account (#2 níže) |
 | API key migrace na Keychain | 📋 Bezpečnostní vylepšení (#4 níže) |
@@ -236,7 +236,7 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 | Settings search | ✅ Hotovo | předchozí commit |
 | Dynamic Type clamp | ✅ Hotovo | předchozí commit |
 | NSTextView log + severity coloring | ✅ Hotovo | předchozí commit |
-| Quick Look Preview Extension target | ✅ Hotovo | `SpiceHarvesterQuickLook` extension bundle + `SHQuickLookPreview.swift` source |
+| Quick Look Preview Extension target | 📋 **Nehotovo** | Target v `project.pbxproj` neexistuje (jen 3 targety: app/Tests/UITests). Kanonický zdroj `SpiceHarvester/QuickLook/SHQuickLookPreview.swift` je za `#if QUICK_LOOK_EXTENSION` guardem, takže se zatím nikam nekompiluje. Viz #1. (Dřívější osiřelý duplikát `SpiceHarvesterQuickLook/` mimo projekt byl smazán.) |
 | UTI + Export `.spice-result.json` + Import | ✅ Hotovo | `Info.plist` `CFBundleDocumentTypes` + `UTExportedTypeDeclarations`, `SHExportService` per-file `*.spice-result.json` naming + `SHAppViewModel.openSpiceResultFile` + `SHAppDelegate.application(_:open:)` bridge |
 
 ---
