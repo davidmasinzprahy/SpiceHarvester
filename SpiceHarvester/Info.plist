@@ -16,6 +16,18 @@
 				<string>DavidMasin.SpiceHarvester.result</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Spice Harvester Project</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>DavidMasin.SpiceHarvester.project</string>
+			</array>
+		</dict>
 	</array>
 
 	<key>UTExportedTypeDeclarations</key>
@@ -36,6 +48,25 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>spice-result.json</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeDescription</key>
+			<string>Spice Harvester Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeIcons</key>
+			<dict/>
+			<key>UTTypeIdentifier</key>
+			<string>DavidMasin.SpiceHarvester.project</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>spiceharvester.json</string>
 				</array>
 			</dict>
 		</dict>

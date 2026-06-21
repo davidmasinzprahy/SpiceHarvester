@@ -47,6 +47,7 @@ Cleanup je automatický — když první běh skončí (success/cancel/fail), dr
 
 - **Cmd+Shift+S** — uloží snapshot folderů, modelů, promptu a režimu do `.spiceharvester.json`
 - **Cmd+O** — načte projekt zpět; sandbox bookmarky **nelze obejít**, takže pokud cesty z projektu nebyly v této instalaci dosud vybrány, aplikace upozorní alertem a uživatel musí re-pick
+- **Finder** — `.spiceharvester.json` lze otevřít i **dvojklikem** nebo **přetažením na ikonu** aplikace (projekt se načte do hlavního okna; během běhu úlohy se otevření odmítne)
 - **Server registry** se neukládá do projektu (servery jsou globální per-installation)
 
 ## Klávesové zkratky

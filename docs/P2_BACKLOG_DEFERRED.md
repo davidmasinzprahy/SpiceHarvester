@@ -13,7 +13,7 @@ implementace, scope a očekávaný čas. Slouží jako vstup pro budoucí ticket
 | Save / Load Project commands (interim za DocumentGroup) | ✅ Hotovo |
 | Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo + per-tab title/server + collision detection + Help window scene |
 | Quick Look provider (extension target) | ✅ Hotovo — `SpiceHarvesterQuickLook` app-extension target, data-based `QLPreviewProvider`, embed do appky |
-| Plný DocumentGroup s file-based persistencí | 📋 3-day refactor (#2 níže) |
+| Otevření projektu z Finderu (DocumentGroup gap) | ✅ Hotovo variantou B — `.spiceharvester.json` UTI + `application(_:open:)` routing; plný `DocumentGroup` refactor záměrně nerealizován (viz #2) |
 | API key migrace na Keychain | ✅ Hotovo — `SHKeychain` + `SHServerRegistryStore`, `apiKey` mimo Codable, jednorázová migrace plaintextu |
 
 ## 1. Quick Look provider pro výstupní JSON
@@ -78,6 +78,13 @@ incrementálně bez Xcode IDE.
 ---
 
 ## 2. Multi-window support přes DocumentGroup
+
+> ✅ **VYŘEŠENO variantou B** — plný `DocumentGroup` refactor se **nerealizoval**
+> (vysoké riziko na 3108řádkovém `SHAppViewModel`, většina přínosu už pokryta
+> interimem). Jediná reálná mezera — otevření projektu z Finderu — je zavřená
+> registrací UTI `DavidMasin.SpiceHarvester.project` + routingem v
+> `application(_:open:)`. Viz [spec](superpowers/specs/2026-06-21-finder-open-projektu-design.md).
+> Sekce níže je historický záznam plné varianty.
 
 ### Co a proč
 Aktuálně `WindowGroup` = single window. Pro power-usera s 3 různými
@@ -153,11 +160,12 @@ Místo plné DocumentGroup migrace je nyní implementováno:
    primary window's slot), ale server registry sdílí. Pro persistování
    scratch konfigu uživatel použije Uložit projekt jako…
 
-**Co interim NEzvládá oproti plné DocumentGroup:**
-- Žádný File → Open Recent (každé otevření přes panel)
-- Žádný drag .spiceharvester soubor na app icon
+**Co interim NEzvládá oproti plné DocumentGroup (aktualizováno):**
+- ~~Žádný File → Open Recent~~ — **funguje** (`recentProjectURLs` + menu „Otevřít nedávné").
+- ~~Žádný drag .spiceharvester soubor na app icon~~ — **vyřešeno variantou B** (UTI + Finder open).
+- Žádný nativní document lifecycle (autosave/versions/modified-dot) — zůstává; live UserDefaults persistence stačí.
 - Migrace existing UserDefaults config nepotřebuje žádnou — primary window
-  načítá UserDefaults dál jako vždy
+  načítá UserDefaults dál jako vždy.
 
 ### Odhad
 - Refactor SHAppViewModel split: **1 den**
@@ -170,9 +178,9 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 
 ## Priority
 
-1. **DocumentGroup** je největší architectural shift — pokud je multi-project
-   workflow reálná uživatelská potřeba, tohle je správný čas. Jediná zbývající
-   otevřená položka.
+Žádné otevřené P2 položky. Plný `DocumentGroup` refactor je vědomě odložený
+(nerentabilní vůči interimu + variantě B); pokud by v budoucnu vznikla potřeba
+nativního document lifecycle (autosave/versions), je historický plán výše.
 
 ---
 
@@ -189,11 +197,13 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 | UTI + Export `.spice-result.json` + Import | ✅ Hotovo | `Info.plist` `CFBundleDocumentTypes` + `UTExportedTypeDeclarations`, `SHExportService` per-file `*.spice-result.json` naming + `SHAppViewModel.openSpiceResultFile` + `SHAppDelegate.application(_:open:)` bridge |
 | API klíče v Keychainu | ✅ Hotovo | `SHKeychain` (generic password, per-server UUID) za protokolem `SHAPIKeyStoring`; `SHServerConfig.apiKey` mimo `Codable`; `SHServerRegistryStore` hydratuje/ukládá klíče zvlášť, jednorázová migrace plaintextu z UserDefaults, úklid při odebrání serveru. Testy v `SHServerRegistryTests`. |
 | Resizovatelné okno Předvoleb | ✅ Hotovo | `SettingsWindowConfigurator` napojí Settings `NSWindow` na AppKit autosave (jako hlavní okno); frame je `min…max` místo pevné velikosti |
+| Otevření projektu z Finderu | ✅ Hotovo | UTI `DavidMasin.SpiceHarvester.project` (`spiceharvester.json`) + `CFBundleDocumentTypes`; `SHAppDelegate.fileKind(for:)` (pure, testováno) routuje v `application(_:open:)` projekty na `openProject(at:)` a výsledky na `openSpiceResultFile`. Opraven bug, kde `url.pathExtension == "spice-result.json"` nikdy nesedlo. |
 
 ---
 
 ## Poznámka
 
-Migrace API klíčů do Keychainu už je **hotová** (viz tabulka výše) — implementace
-`SHKeychain` / `SHServerRegistryStore`. Tento soubor sleduje jen zbývající
-odloženou položku #2 DocumentGroup (Quick Look #1 je hotový).
+Všechny P2 položky jsou vyřešené: Quick Look (#1) plným extension targetem,
+DocumentGroup (#2) variantou B (Finder-open), API klíče v Keychainu. Zbývá jen
+vědomě odložený plný `DocumentGroup` refactor — viz historický plán v sekci #2,
+realizovat jen pokud vznikne potřeba nativního document lifecycle.

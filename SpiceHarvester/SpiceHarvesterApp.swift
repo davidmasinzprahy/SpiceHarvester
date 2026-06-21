@@ -486,10 +486,21 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
     /// result is pushed into `vm.loadedResult` so it appears in the
     /// primary window's notification bar even if a scratch window was
     /// focused at the time of the open.
+    /// Klasifikace souboru otevřeného z Finderu podle koncovky. Čistá funkce
+    /// (testovatelná). Matchuje přes `lastPathComponent.hasSuffix` — `pathExtension`
+    /// vrací jen `"json"`, takže by dvojité přípony `*.spiceharvester.json` /
+    /// `*.spice-result.json` nikdy nesedly.
+    nonisolated static func fileKind(for url: URL) -> SHOpenableFile {
+        let name = url.lastPathComponent
+        if name.hasSuffix(".spiceharvester.json") { return .project }
+        if name.hasSuffix(".spice-result.json") { return .result }
+        return .unsupported
+    }
+
     func application(_ application: NSApplication, open: [URL]) {
-        guard let url = open.first, !url.pathExtension.isEmpty else { return }
-        // Only handle our own UTI — ignore unrelated drops.
-        guard url.pathExtension == "spice-result.json" else { return }
+        guard let url = open.first else { return }
+        let kind = Self.fileKind(for: url)
+        guard kind != .unsupported else { return }
         guard let vm = primaryViewModel else {
             // App is still launching — show an alert so the user knows
             // the open failed rather than silently dropping the file.
@@ -500,6 +511,31 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
             alert.runModal()
             return
         }
-        _ = vm.openSpiceResultFile(url)
+        switch kind {
+        case .result:
+            _ = vm.openSpiceResultFile(url)
+        case .project:
+            guard !vm.isRunning else {
+                let alert = NSAlert()
+                alert.messageText = "Úloha běží"
+                alert.informativeText = "Projekt nelze otevřít během zpracování. Počkej na dokončení nebo běh přeruš."
+                alert.alertStyle = .informational
+                alert.runModal()
+                return
+            }
+            SHAppDelegate.handleOpenProjectOutcome(vm.openProject(at: url))
+        case .unsupported:
+            return
+        }
     }
+}
+
+/// Typ souboru, který umí aplikace otevřít z Finderu (dvojklik / drag na ikonu).
+enum SHOpenableFile: Equatable {
+    /// Projektový snapshot `*.spiceharvester.json` (Uložit projekt jako…).
+    case project
+    /// Per-document výsledek `*.spice-result.json`.
+    case result
+    /// Neznámý / nepodporovaný soubor — ignorovat.
+    case unsupported
 }
