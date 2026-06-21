@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		DDCCDDCC2E0870CA00F34713 /* SpiceHarvesterQuickLook.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DDCCDDCC2E0870CA00F34702 /* SpiceHarvesterQuickLook.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		63A1C0E52E0870CA00F34733 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,12 +25,34 @@
 			remoteGlobalIDString = 63A1C0D52E0870C900F34733;
 			remoteInfo = SpiceHarvester;
 		};
+		DDCCDDCC2E0870CA00F34710 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 63A1C0CE2E0870C900F34733 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DDCCDDCC2E0870CA00F34703;
+			remoteInfo = SpiceHarvesterQuickLook;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DDCCDDCC2E0870CA00F34712 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DDCCDDCC2E0870CA00F34713 /* SpiceHarvesterQuickLook.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		63A1C0D62E0870C900F34733 /* SpiceHarvester.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SpiceHarvester.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		63A1C0E42E0870CA00F34733 /* SpiceHarvesterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpiceHarvesterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		63A1C0EE2E0870CA00F34733 /* SpiceHarvesterUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpiceHarvesterUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DDCCDDCC2E0870CA00F34702 /* SpiceHarvesterQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SpiceHarvesterQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -45,7 +71,26 @@
 			path = SpiceHarvesterUITests;
 			sourceTree = "<group>";
 		};
+		DDCCDDCC2E0870CA00F34701 /* SpiceHarvesterQuickLook */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				DDCCDDCC2E0870CA00F34714 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+			);
+			path = SpiceHarvesterQuickLook;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		DDCCDDCC2E0870CA00F34714 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				SpiceHarvesterQuickLook.entitlements,
+			);
+			target = DDCCDDCC2E0870CA00F34703 /* SpiceHarvesterQuickLook */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		63A1C0D32E0870C900F34733 /* Frameworks */ = {
@@ -69,6 +114,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DDCCDDCC2E0870CA00F34705 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -78,6 +130,7 @@
 				63A1C0D82E0870C900F34733 /* SpiceHarvester */,
 				63A1C0E72E0870CA00F34733 /* SpiceHarvesterTests */,
 				63A1C0F12E0870CA00F34733 /* SpiceHarvesterUITests */,
+				DDCCDDCC2E0870CA00F34701 /* SpiceHarvesterQuickLook */,
 				63A1C0D72E0870C900F34733 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,6 +141,7 @@
 				63A1C0D62E0870C900F34733 /* SpiceHarvester.app */,
 				63A1C0E42E0870CA00F34733 /* SpiceHarvesterTests.xctest */,
 				63A1C0EE2E0870CA00F34733 /* SpiceHarvesterUITests.xctest */,
+				DDCCDDCC2E0870CA00F34702 /* SpiceHarvesterQuickLook.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -102,10 +156,12 @@
 				63A1C0D22E0870C900F34733 /* Sources */,
 				63A1C0D32E0870C900F34733 /* Frameworks */,
 				63A1C0D42E0870C900F34733 /* Resources */,
+				DDCCDDCC2E0870CA00F34712 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				DDCCDDCC2E0870CA00F34711 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				63A1C0D82E0870C900F34733 /* SpiceHarvester */,
@@ -116,6 +172,28 @@
 			productName = SpiceHarvester;
 			productReference = 63A1C0D62E0870C900F34733 /* SpiceHarvester.app */;
 			productType = "com.apple.product-type.application";
+		};
+		DDCCDDCC2E0870CA00F34703 /* SpiceHarvesterQuickLook */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DDCCDDCC2E0870CA00F34707 /* Build configuration list for PBXNativeTarget "SpiceHarvesterQuickLook" */;
+			buildPhases = (
+				DDCCDDCC2E0870CA00F34704 /* Sources */,
+				DDCCDDCC2E0870CA00F34705 /* Frameworks */,
+				DDCCDDCC2E0870CA00F34706 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				DDCCDDCC2E0870CA00F34701 /* SpiceHarvesterQuickLook */,
+			);
+			name = SpiceHarvesterQuickLook;
+			packageProductDependencies = (
+			);
+			productName = SpiceHarvesterQuickLook;
+			productReference = DDCCDDCC2E0870CA00F34702 /* SpiceHarvesterQuickLook.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		63A1C0E32E0870CA00F34733 /* SpiceHarvesterTests */ = {
 			isa = PBXNativeTarget;
@@ -184,6 +262,9 @@
 						CreatedOnToolsVersion = 16.4;
 						TestTargetID = 63A1C0D52E0870C900F34733;
 					};
+					DDCCDDCC2E0870CA00F34703 = {
+						CreatedOnToolsVersion = 16.4;
+					};
 				};
 			};
 			buildConfigurationList = 63A1C0D12E0870C900F34733 /* Build configuration list for PBXProject "SpiceHarvester" */;
@@ -201,6 +282,7 @@
 			projectRoot = "";
 			targets = (
 				63A1C0D52E0870C900F34733 /* SpiceHarvester */,
+				DDCCDDCC2E0870CA00F34703 /* SpiceHarvesterQuickLook */,
 				63A1C0E32E0870CA00F34733 /* SpiceHarvesterTests */,
 				63A1C0ED2E0870CA00F34733 /* SpiceHarvesterUITests */,
 			);
@@ -223,6 +305,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		63A1C0EC2E0870CA00F34733 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDCCDDCC2E0870CA00F34706 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -253,6 +342,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DDCCDDCC2E0870CA00F34704 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -265,6 +361,11 @@
 			isa = PBXTargetDependency;
 			target = 63A1C0D52E0870C900F34733 /* SpiceHarvester */;
 			targetProxy = 63A1C0EF2E0870CA00F34733 /* PBXContainerItemProxy */;
+		};
+		DDCCDDCC2E0870CA00F34711 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DDCCDDCC2E0870CA00F34703 /* SpiceHarvesterQuickLook */;
+			targetProxy = DDCCDDCC2E0870CA00F34710 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -525,6 +626,60 @@
 			};
 			name = Release;
 		};
+		DDCCDDCC2E0870CA00F34708 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SpiceHarvesterQuickLook/SpiceHarvesterQuickLook.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 839ECBL3D2;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SpiceHarvesterQuickLook/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = DavidMasin.SpiceHarvester.SpiceHarvesterQuickLook;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		DDCCDDCC2E0870CA00F34709 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SpiceHarvesterQuickLook/SpiceHarvesterQuickLook.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 839ECBL3D2;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SpiceHarvesterQuickLook/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = DavidMasin.SpiceHarvester.SpiceHarvesterQuickLook;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -560,6 +715,15 @@
 			buildConfigurations = (
 				63A1C0FF2E0870CA00F34733 /* Debug */,
 				63A1C1002E0870CA00F34733 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DDCCDDCC2E0870CA00F34707 /* Build configuration list for PBXNativeTarget "SpiceHarvesterQuickLook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DDCCDDCC2E0870CA00F34708 /* Debug */,
+				DDCCDDCC2E0870CA00F34709 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
