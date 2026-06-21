@@ -1,28 +1,3 @@
-// MARK: – Quick Look Preview Provider (deferred target)
-//
-// This file is intentionally NOT part of the main SpiceHarvester target.
-// It's checked-in scaffolding for a future "Quick Look Preview Extension"
-// target; once that target is added in Xcode, drop this file into it and
-// the rest of the wiring is described in `docs/P2_BACKLOG_DEFERRED.md`.
-//
-// Excluded from main target via the `#if QUICK_LOOK_EXTENSION` guard so
-// this file compiles cleanly alongside the host app — the host doesn't
-// link `QuickLookUI` and shouldn't.
-//
-// To activate:
-//   1. Xcode → File → New → Target → Quick Look Preview Extension
-//      (target name `SpiceHarvesterQuickLook`).
-//   2. In the new target's build settings, add `QUICK_LOOK_EXTENSION` to
-//      `Active Compilation Conditions`.
-//   3. Drag this file into the new target's compile sources.
-//   4. Add UTI `DavidMasin.SpiceHarvester.result` to the host app's
-//      `UTExportedTypeDeclarations` and to the extension's
-//      `QLSupportedContentTypes`.
-//   5. Update `SHExportService` to write `*.spice-result.json` so the
-//      UTI matcher picks them up.
-
-#if QUICK_LOOK_EXTENSION
-
 import Cocoa
 import QuickLookUI
 
@@ -124,5 +99,3 @@ final class SHQuickLookPreview: QLPreviewProvider, QLPreviewingController {
         """
     }
 }
-
-#endif
