@@ -25,6 +25,33 @@ final class SHOcrmypdfProvider: SHOCRProviding, Sendable {
         return trimmed.isEmpty ? defaultLanguages : trimmed
     }
 
+    /// Rozparsuje výstup `tesseract --list-langs` na množinu dostupných kódů.
+    /// Hlavičkový řádek („List of available languages…") i víceslovné řádky se
+    /// ignorují. Funguje na stdout i stderr (tesseract list rozhazuje mezi oba).
+    static func parseAvailableLanguages(from output: String) -> Set<String> {
+        var langs = Set<String>()
+        for rawLine in output.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            if line.lowercased().hasPrefix("list of available languages") { continue }
+            if line.contains(" ") { continue }
+            langs.insert(line)
+        }
+        return langs
+    }
+
+    /// Kódy z uživatelského `+`-vstupu, které nejsou mezi dostupnými jazyky.
+    /// Když dostupné nejsou známé (prázdná množina, např. tesseract chybí),
+    /// vrací prázdno — nehlásíme falešné poplachy.
+    static func unsupportedLanguages(in input: String, available: Set<String>) -> [String] {
+        guard !available.isEmpty else { return [] }
+        let codes = input
+            .split(separator: "+")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return codes.filter { !available.contains($0) }
+    }
+
     func extractText(from fileURL: URL) async throws -> [String] {
         guard runtime.resolve(.ocrmypdf) != nil else { return [] }
 

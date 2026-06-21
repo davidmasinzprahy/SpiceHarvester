@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Native macOS Settings sheet (Cmd+,). Hosts everything that the user normally
 /// configures once and forgets: pipeline performance knobs, request timeout,
@@ -20,6 +21,9 @@ struct SettingsView: View {
     /// Stav nástrojů probneme jen jednou za sezení, ne při každém zobrazení OCR tabu.
     @State private var toolStatusProbed = false
     @FocusState private var ocrLanguagesFocused: Bool
+    /// Jazyky, které má nainstalovaný tesseract (`--list-langs`) — pro nápovědu
+    /// a varování u pole „Jazyky". Prázdné = nezjištěno (tesseract chybí).
+    @State private var availableOCRLanguages: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -68,7 +72,13 @@ struct SettingsView: View {
 
             selectedTabContent
         }
-        .frame(width: 620, height: 580)
+        // Resizovatelný rozsah místo pevné velikosti — ideální = původní
+        // 620×580 (beze změny prvního spuštění), ale uživatel může okno
+        // zvětšit/zmenšit. `SettingsWindowConfigurator` níže udělá okno
+        // resizable a uloží frame přes AppKit autosave (stejně jako hlavní okno).
+        .frame(minWidth: 480, idealWidth: 620, maxWidth: .infinity,
+               minHeight: 460, idealHeight: 580, maxHeight: .infinity)
+        .background(SettingsWindowConfigurator())
     }
 
     @ViewBuilder
@@ -234,6 +244,12 @@ struct SettingsView: View {
             in2csvStatusText = Self.toolStatusLabel(await registry.status(for: .in2csv))
             ocrmypdfStatusText = Self.toolStatusLabel(await registry.status(for: .ocrmypdf))
             tesseractStatusText = Self.toolStatusLabel(await registry.status(for: .tesseract))
+
+            // Dostupné OCR jazyky z tesseractu (seznam jde na stdout i stderr).
+            if let result = try? await SHToolRuntime().run(.tesseract, arguments: ["--list-langs"], timeout: 10) {
+                let combined = result.stdoutString + "\n" + result.stderrString
+                availableOCRLanguages = SHOcrmypdfProvider.parseAvailableLanguages(from: combined)
+            }
         }
     }
 
@@ -267,6 +283,14 @@ struct SettingsView: View {
                     .focused($ocrLanguagesFocused)
                     .onSubmit { commitOCRLanguages() }
             }
+            if !unsupportedOCRLanguages.isEmpty {
+                Label(
+                    "Nedostupné jazyky: \(unsupportedOCRLanguages.joined(separator: ", ")) — ocrmypdf je přeskočí (fallback na Apple Vision). Doplň traineddata.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
             Stepper(
                 value: $vm.config.ocrTimeoutSeconds,
                 in: 60...3_600,
@@ -280,10 +304,20 @@ struct SettingsView: View {
         } header: {
             Text("OCR ocrmypdf")
         } footer: {
-            Text("Jazyky tesseractu spojené znakem +. Bundlovaná tessdata obsahují jen ces/slk/deu/pol/eng; jiné jazyky vyžadují doplnit traineddata. Timeout omezuje jeden běh ocrmypdf nad dokumentem. Platí pro backend „ocrmypdf“.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Jazyky tesseractu spojené znakem +. Bundlovaná tessdata obsahují jen ces/slk/deu/pol/eng; jiné jazyky vyžadují doplnit traineddata. Timeout omezuje jeden běh ocrmypdf nad dokumentem. Platí pro backend „ocrmypdf“.")
+                if !availableOCRLanguages.isEmpty {
+                    Text("Dostupné jazyky: \(availableOCRLanguages.sorted().joined(separator: ", "))")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
+    }
+
+    /// Kódy z pole „Jazyky", které tesseract nemá nainstalované (varování v UI).
+    private var unsupportedOCRLanguages: [String] {
+        SHOcrmypdfProvider.unsupportedLanguages(in: vm.config.ocrLanguages, available: availableOCRLanguages)
     }
 
     /// Po dokončení editace jazyků: prázdné/whitespace → default (shodně s
@@ -398,6 +432,38 @@ struct SettingsView: View {
         let m = seconds / 60
         let s = seconds % 60
         return s == 0 ? "\(m) min" : "\(m) m \(s) s"
+    }
+}
+
+/// Zpřístupní obklopující `NSWindow` Settings scény, udělá ho resizovatelným
+/// a napojí na AppKit autosave — uživatel si zvolí velikost a ta přežije restart,
+/// stejně jako u hlavního okna (viz `SHAppDelegate.mainWindowAutosaveName`).
+/// SwiftUI `Settings { }` scéna sama velikost neukládá a při pevném frame ji
+/// drží nezměnitelnou.
+private struct SettingsWindowConfigurator: NSViewRepresentable {
+    /// Cocoa ukládá frame do NSGlobalDomain pod `NSWindow Frame {name}`.
+    static let autosaveName = "SpiceHarvesterSettingsWindow"
+
+    func makeNSView(context: Context) -> NSView { ConfiguratorView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    /// Naváže se přesně na okamžik připojení k oknu (ne na odhad jednoho ticku),
+    /// takže `NSWindow` je zaručeně k dispozici. Frame aplikujeme async, aby
+    /// restore nepřebil SwiftUI layout pass obsahu.
+    private final class ConfiguratorView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            DispatchQueue.main.async {
+                window.styleMask.insert(.resizable)
+                // Restore uloženého frame, pak zapnout autosave budoucích změn.
+                // Idempotentní — neaplikuj znovu, když už je autosave nastaven.
+                if window.frameAutosaveName != SettingsWindowConfigurator.autosaveName {
+                    window.setFrameUsingName(SettingsWindowConfigurator.autosaveName)
+                    window.setFrameAutosaveName(SettingsWindowConfigurator.autosaveName)
+                }
+            }
+        }
     }
 }
 

@@ -51,15 +51,18 @@ struct SHServerConfig: Codable, Identifiable, Hashable, Sendable {
     /// Optional bearer token sent in `Authorization: Bearer <apiKey>` header.
     /// Empty by default (LM Studio's default config doesn't require auth).
     ///
-    /// **SECURITY NOTE**: Persisted alongside the rest of `SHServerConfig`
-    /// via `Codable` to UserDefaults — i.e. **plaintext on disk** in the
-    /// app's sandbox container (`~/Library/Containers/.../Preferences/`).
-    /// For local-only LM Studio the field is typically empty so the
-    /// exposure is theoretical, but if you point Spice Harvester at a
-    /// hosted OpenAI-compatible proxy that does require a bearer token,
-    /// be aware. A proper Keychain migration is tracked in
-    /// `docs/P2_BACKLOG_DEFERRED.md`.
-    var apiKey: String
+    /// **Drženo jen v paměti za běhu** — záměrně **mimo `Codable`** (viz
+    /// `CodingKeys` níže), takže se nikdy nezapíše do UserDefaults plaintext.
+    /// Persistenci řeší `SHServerRegistryStore` přes Keychain (`SHKeychain`);
+    /// při načtení se hodnota dohydratuje, při uložení zapíše do Keychainu.
+    /// Existující plaintext klíče z dřívějška se jednorázově zmigrují.
+    var apiKey: String = ""
+
+    /// `apiKey` je z Codable vynechán schválně — nesmí do UserDefaults. Ostatní
+    /// pole se persistují normálně.
+    enum CodingKeys: String, CodingKey {
+        case id, name, baseURL
+    }
 
     var normalizedBaseURL: URL? {
         let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -84,8 +84,7 @@ Spice Harvester je navržený pro lokální zpracování citlivých dokumentů.
 - aplikace neobsahuje telemetrii
 - notifikace neobsahují názvy souborů ani citlivé detaily
 - App Sandbox je zapnutý
-
-Pozor: API klíče jsou zatím uložené v UserDefaults jako plaintext. Migrace do Keychainu je vedená v backlogu.
+- API klíče serverů jsou uložené v systémovém Keychainu (ne plaintext na disku)
 
 ## Dokumentace
 

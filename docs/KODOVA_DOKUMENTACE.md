@@ -161,7 +161,8 @@ Poznámka k runtime: **při startu se část hodnot záměrně resetuje** (slož
 ### Registry serverů
 `SHServerRegistryStore` ukládá pole `SHServerConfig`:
 - `id` (UUID)
-- `name`, `baseURL`, `apiKey`
+- `name`, `baseURL` — do UserDefaults (JSON)
+- `apiKey` — **mimo `Codable`** (vynechán z `SHServerConfig.CodingKeys`), takže se do UserDefaults nikdy nezapíše plaintext. Klíče drží **Keychain** (`SHKeychain`, generic password, account = `serverID.uuidString`) za protokolem `SHAPIKeyStoring` (injektovatelný kvůli testům). `loadServers` klíče dohydratuje z Keychainu, `saveServers` je tam zapíše (prázdný klíč = smazat), `removeAPIKey` uklidí při odebrání serveru. Existující plaintext klíče z dřívějška se při prvním načtení jednorázově zmigrují a UserDefaults se přepíše bez nich.
 
 Chyby dekódu se logují do `os.Logger`, ne polykají přes `try?`.
 

@@ -280,7 +280,7 @@ Otevři přes menu **Spice Harvester → Settings…** nebo zkratkou `Cmd+,`. Na
 
 ### Tab OCR
 - **OCR backend** — `Apple Vision` běží lokálně bez AI serveru; `oMLX/VLM` posílá skenované stránky vybranému OCR/VLM modelu; `Vision→VLM` použije VLM jako fallback pro stránky, kde Vision nevrátí použitelný text; `ocrmypdf` je lokální OCR přes tesseract (bez AI serveru), při nedostupnosti spadne na Apple Vision.
-- **OCR ocrmypdf** — *Jazyky* tesseractu spojené znakem `+` (default `ces+slk+deu+pol+eng`; bundlovaná tessdata obsahují jen tyto jazyky). Prázdné pole se po potvrzení vrátí na default. *Timeout* omezuje jeden běh ocrmypdf nad dokumentem. Platí pro backend `ocrmypdf`.
+- **OCR ocrmypdf** — *Jazyky* tesseractu spojené znakem `+` (default `ces+slk+deu+pol+eng`; bundlovaná tessdata obsahují jen tyto jazyky). Pod polem se ukáže seznam **dostupných jazyků** zjištěných z tesseractu; když zadáš kód, který chybí, objeví se ⚠️ varování (ocrmypdf takový jazyk přeskočí a spadne na Apple Vision). Prázdné pole se po potvrzení vrátí na default. *Timeout* omezuje jeden běh ocrmypdf nad dokumentem. Platí pro backend `ocrmypdf`.
 - **Licence třetích stran** — přehled licencí bundlovaných nástrojů (mj. Ghostscript pod AGPL-3.0); detail v `docs/LICENCE_TRETI_STRANY.md`.
 
 ### Tab Cache

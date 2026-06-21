@@ -1045,7 +1045,10 @@ final class SHAppViewModel {
 
     func removeSelectedServer() {
         guard !servers.isEmpty else { return }
+        let removedID = servers[selectedServerIndex].id
         servers.remove(at: selectedServerIndex)
+        // Ukliď API klíč odebraného serveru z Keychainu (jinak osiřelý záznam).
+        serverStore.removeAPIKey(for: removedID)
         config.selectedServerID = servers.first?.id
         clearModelSelectionForServerChange()
         if servers.isEmpty {

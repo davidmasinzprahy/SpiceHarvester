@@ -244,6 +244,28 @@ import Testing
         #expect(SHOcrmypdfProvider.normalizedLanguages("deu") == "deu")
     }
 
+    @Test func ocrmypdfParsesAvailableLanguages() {
+        let output = """
+        List of available languages in "/x/tessdata/" (6):
+        ces
+        deu
+        eng
+        osd
+        pol
+        slk
+        """
+        let langs = SHOcrmypdfProvider.parseAvailableLanguages(from: output)
+        #expect(langs == ["ces", "deu", "eng", "osd", "pol", "slk"])
+    }
+
+    @Test func ocrmypdfDetectsUnsupportedLanguages() {
+        let available: Set<String> = ["ces", "eng", "deu"]
+        #expect(SHOcrmypdfProvider.unsupportedLanguages(in: "ces+eng", available: available).isEmpty)
+        #expect(SHOcrmypdfProvider.unsupportedLanguages(in: "ces+jpn+xyz", available: available) == ["jpn", "xyz"])
+        // Neznámá dostupnost (prázdná množina) → žádný falešný poplach.
+        #expect(SHOcrmypdfProvider.unsupportedLanguages(in: "ces+jpn", available: []).isEmpty)
+    }
+
     @Test func ocrmypdfProviderReturnsEmptyWhenToolMissing() async throws {
         // runtime bez helpers i PATH -> resolve(.ocrmypdf) == nil
         let runtime = SHToolRuntime(helpersDirectory: nil, pathDirectories: [])

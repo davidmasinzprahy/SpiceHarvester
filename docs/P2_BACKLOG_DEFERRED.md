@@ -14,7 +14,7 @@ implementace, scope a očekávaný čas. Slouží jako vstup pro budoucí ticket
 | Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo + per-tab title/server + collision detection + Help window scene |
 | Quick Look provider — zdroj + UTI/export | ✅ Zdroj `SHQuickLookPreview.swift` (guarded) + UTI/export `.spice-result.json` hotové; **Xcode extension target chybí** (#1 níže) |
 | Plný DocumentGroup s file-based persistencí | 📋 3-day refactor (#2 níže) |
-| API key migrace na Keychain | 📋 Bezpečnostní vylepšení (#3 níže) |
+| API key migrace na Keychain | ✅ Hotovo — `SHKeychain` + `SHServerRegistryStore`, `apiKey` mimo Codable, jednorázová migrace plaintextu |
 
 ## 1. Quick Look provider pro výstupní JSON
 
@@ -183,46 +183,13 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 | NSTextView log + severity coloring | ✅ Hotovo | předchozí commit |
 | Quick Look Preview Extension target | 📋 **Nehotovo** | Target v `project.pbxproj` neexistuje (jen 3 targety: app/Tests/UITests). Kanonický zdroj `SpiceHarvester/QuickLook/SHQuickLookPreview.swift` je za `#if QUICK_LOOK_EXTENSION` guardem, takže se zatím nikam nekompiluje. Viz #1. (Dřívější osiřelý duplikát `SpiceHarvesterQuickLook/` mimo projekt byl smazán.) |
 | UTI + Export `.spice-result.json` + Import | ✅ Hotovo | `Info.plist` `CFBundleDocumentTypes` + `UTExportedTypeDeclarations`, `SHExportService` per-file `*.spice-result.json` naming + `SHAppViewModel.openSpiceResultFile` + `SHAppDelegate.application(_:open:)` bridge |
+| API klíče v Keychainu | ✅ Hotovo | `SHKeychain` (generic password, per-server UUID) za protokolem `SHAPIKeyStoring`; `SHServerConfig.apiKey` mimo `Codable`; `SHServerRegistryStore` hydratuje/ukládá klíče zvlášť, jednorázová migrace plaintextu z UserDefaults, úklid při odebrání serveru. Testy v `SHServerRegistryTests`. |
+| Resizovatelné okno Předvoleb | ✅ Hotovo | `SettingsWindowConfigurator` napojí Settings `NSWindow` na AppKit autosave (jako hlavní okno); frame je `min…max` místo pevné velikosti |
 
 ---
 
-## 3. Migrace API klíčů do Keychainu
+## Poznámka
 
-### Co a proč
-`SHServerConfig.apiKey` je dnes plaintext v UserDefaults. Pro pure-localhost LM Studio (default config bez auth) je pole prázdné, takže reálná expozice je nulová — ale jakmile uživatel napojí app na hosted OpenAI-compatible proxy s bearer tokenem (nebo třeba Anthropic-compatible gateway), token přežívá v `~/Library/Containers/.../Preferences/` plaintext na disku.
-
-### Proč odloženo
-Keychain Services API není ergonomicky pro Codable-driven persistence — vyžaduje samostatný read/write/update flow s `SecItemAdd` / `SecItemCopyMatching` / `SecItemUpdate` a explicit error handling. Refactor postihne:
-- `SHServerConfig` Codable encoder/decoder (apiKey přesunout mimo)
-- `SHServerRegistryStore` save/load flow
-- Migraci existujících uživatelů (read existing UserDefaults plaintext → write Keychain → strip plaintext)
-- Cleanup při remove server
-
-### Implementační kroky
-1. Vyčlenit Keychain helper:
-   ```swift
-   enum SHKeychain {
-       static func store(apiKey: String, for serverID: UUID) throws
-       static func loadAPIKey(for serverID: UUID) -> String?
-       static func remove(for serverID: UUID) throws
-   }
-   ```
-   Account = `serverID.uuidString`, service = `"DavidMasin.SpiceHarvester.apiKey"`.
-2. `SHServerConfig` ztratí `apiKey` z Codable; přidá computed `apiKey: String { get { SHKeychain.loadAPIKey(for: id) ?? "" }; set { try? SHKeychain.store(...) } }` — ale computed properties nejdou v structu... tak buď:
-   - `SHServerConfig` zůstane Codable bez apiKey, viewmodel si ho cachuje per-id
-   - NEBO `SHServerConfig` se z structu změní na class (anti-pattern v Codable)
-3. Migrace v `SHAppViewModel.init`: jednorázově projít `servers`, pokud apiKey != "", přesunout do Keychain a vyčistit z UserDefaults.
-4. UI v Settings: tlačítko „Smazat z Keychainu" pro paranoid users.
-
-### Risk
-- Keychain access vyžaduje `keychain-access-groups` entitlement pro shared access (mezi instalacemi není potřeba).
-- Sandboxed app bez explicit entitlement používá per-app Keychain bucket — funguje OOTB.
-- **Migration path** musí být atomická (load existing → write Keychain → write new UserDefaults bez plaintext) jinak může uživatel ztratit token při crash uprostřed.
-- Při testech Keychain prompty mohou blokovat UI testy — potřeba mock layer.
-
-### Odhad
-- Keychain helper + tests: **3 h**
-- Refactor SHServerConfig + SHServerRegistryStore: **2 h**
-- Migration logic: **1 h**
-- UI tweaks (Settings cleanup button): **0.5 h**
-- Celkem ~**1 pracovní den**.
+Migrace API klíčů do Keychainu už je **hotová** (viz tabulka výše) — implementace
+`SHKeychain` / `SHServerRegistryStore`. Tento soubor sleduje jen zbývající
+odložené položky (#1 Quick Look target, #2 DocumentGroup).
