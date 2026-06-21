@@ -12,11 +12,16 @@ implementace, scope a očekávaný čas. Slouží jako vstup pro budoucí ticket
 | AppIntents pro Shortcuts | ✅ Hotovo + parametry + wait + targetFolder + tab activation + structured return |
 | Save / Load Project commands (interim za DocumentGroup) | ✅ Hotovo |
 | Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo + per-tab title/server + collision detection + Help window scene |
-| Quick Look provider — zdroj + UTI/export | ✅ Zdroj `SHQuickLookPreview.swift` (guarded) + UTI/export `.spice-result.json` hotové; **Xcode extension target chybí** (#1 níže) |
+| Quick Look provider (extension target) | ✅ Hotovo — `SpiceHarvesterQuickLook` app-extension target, data-based `QLPreviewProvider`, embed do appky |
 | Plný DocumentGroup s file-based persistencí | 📋 3-day refactor (#2 níže) |
 | API key migrace na Keychain | ✅ Hotovo — `SHKeychain` + `SHServerRegistryStore`, `apiKey` mimo Codable, jednorázová migrace plaintextu |
 
 ## 1. Quick Look provider pro výstupní JSON
+
+> ✅ **HOTOVO** — `SpiceHarvesterQuickLook` extension target přidán (viz
+> [plán](superpowers/plans/2026-06-21-quicklook-extension-target.md) a
+> [spec](superpowers/specs/2026-06-21-quicklook-extension-target-design.md)).
+> Sekce níže je ponechána jako historický záznam.
 
 ### Co a proč
 Spice Harvester ukládá per-document `*.json` a `*_raw.json` do výstupní složky.
@@ -165,10 +170,9 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 
 ## Priority
 
-1. **Quick Look provider** je nejviditelnější uživatelská přidaná hodnota
-   pro nejméně práce (~1 den). Kandidát na další iteraci.
-2. **DocumentGroup** je největší architectural shift — pokud je multi-project
-   workflow reálná uživatelská potřeba, tohle je správný čas.
+1. **DocumentGroup** je největší architectural shift — pokud je multi-project
+   workflow reálná uživatelská potřeba, tohle je správný čas. Jediná zbývající
+   otevřená položka.
 
 ---
 
@@ -181,7 +185,7 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 | Settings search | ✅ Hotovo | předchozí commit |
 | Dynamic Type clamp | ✅ Hotovo | předchozí commit |
 | NSTextView log + severity coloring | ✅ Hotovo | předchozí commit |
-| Quick Look Preview Extension target | 📋 **Nehotovo** | Target v `project.pbxproj` neexistuje (jen 3 targety: app/Tests/UITests). Kanonický zdroj `SpiceHarvester/QuickLook/SHQuickLookPreview.swift` je za `#if QUICK_LOOK_EXTENSION` guardem, takže se zatím nikam nekompiluje. Viz #1. (Dřívější osiřelý duplikát `SpiceHarvesterQuickLook/` mimo projekt byl smazán.) |
+| Quick Look Preview Extension target | ✅ Hotovo | `SpiceHarvesterQuickLook` target (app-extension) se zdrojem `SHQuickLookPreview.swift`, Info.plist (`com.apple.quicklook.preview`, `QLSupportedContentTypes`, `QLIsDataBasedPreview`), entitlements, embed do appky přes Copy Files (PlugIns). Info.plist/entitlements vyřazeny z resources přes membership exception. |
 | UTI + Export `.spice-result.json` + Import | ✅ Hotovo | `Info.plist` `CFBundleDocumentTypes` + `UTExportedTypeDeclarations`, `SHExportService` per-file `*.spice-result.json` naming + `SHAppViewModel.openSpiceResultFile` + `SHAppDelegate.application(_:open:)` bridge |
 | API klíče v Keychainu | ✅ Hotovo | `SHKeychain` (generic password, per-server UUID) za protokolem `SHAPIKeyStoring`; `SHServerConfig.apiKey` mimo `Codable`; `SHServerRegistryStore` hydratuje/ukládá klíče zvlášť, jednorázová migrace plaintextu z UserDefaults, úklid při odebrání serveru. Testy v `SHServerRegistryTests`. |
 | Resizovatelné okno Předvoleb | ✅ Hotovo | `SettingsWindowConfigurator` napojí Settings `NSWindow` na AppKit autosave (jako hlavní okno); frame je `min…max` místo pevné velikosti |
@@ -192,4 +196,4 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 
 Migrace API klíčů do Keychainu už je **hotová** (viz tabulka výše) — implementace
 `SHKeychain` / `SHServerRegistryStore`. Tento soubor sleduje jen zbývající
-odložené položky (#1 Quick Look target, #2 DocumentGroup).
+odloženou položku #2 DocumentGroup (Quick Look #1 je hotový).
