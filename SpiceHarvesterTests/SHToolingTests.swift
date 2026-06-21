@@ -142,6 +142,21 @@ import Testing
         #expect(decoded.spreadsheetConversionEnabled == true)
     }
 
+    @Test func appConfigOCRSettingsDefaultsAndRoundtrip() throws {
+        let config = SHAppConfig()
+        #expect(config.ocrLanguages == "ces+slk+deu+pol+eng")
+        #expect(config.ocrTimeoutSeconds == 600)
+
+        // Ne-default hodnoty musí přežít encode→decode (custom decoder je musí číst).
+        var custom = SHAppConfig()
+        custom.ocrLanguages = "deu+eng"
+        custom.ocrTimeoutSeconds = 900
+        let data = try JSONEncoder().encode(custom)
+        let decoded = try JSONDecoder().decode(SHAppConfig.self, from: data)
+        #expect(decoded.ocrLanguages == "deu+eng")
+        #expect(decoded.ocrTimeoutSeconds == 900)
+    }
+
     @Test func pipelineUsesConverterThenFallsBackToNative() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("conv-\(UUID().uuidString)")
@@ -218,6 +233,15 @@ import Testing
         // se musí zahodit, jinak by spustil zbytečný fallback OCR.
         let pages = SHOcrmypdfProvider.parseSidecarPages("Strana 1\u{0C}Strana 2\u{0C}")
         #expect(pages == ["Strana 1", "Strana 2"])
+    }
+
+    @Test func ocrmypdfNormalizesLanguages() {
+        // Prázdné/whitespace → default odpovídající bundlovaným tessdata.
+        #expect(SHOcrmypdfProvider.normalizedLanguages("") == SHOcrmypdfProvider.defaultLanguages)
+        #expect(SHOcrmypdfProvider.normalizedLanguages("   ") == SHOcrmypdfProvider.defaultLanguages)
+        // Validní vstup se jen ořízne, jinak projde beze změny.
+        #expect(SHOcrmypdfProvider.normalizedLanguages("  ces+eng  ") == "ces+eng")
+        #expect(SHOcrmypdfProvider.normalizedLanguages("deu") == "deu")
     }
 
     @Test func ocrmypdfProviderReturnsEmptyWhenToolMissing() async throws {

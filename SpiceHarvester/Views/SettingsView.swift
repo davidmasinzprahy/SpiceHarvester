@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var tesseractStatusText = "Zjišťuji…"
     /// Stav nástrojů probneme jen jednou za sezení, ne při každém zobrazení OCR tabu.
     @State private var toolStatusProbed = false
+    @FocusState private var ocrLanguagesFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -201,78 +202,27 @@ struct SettingsView: View {
     // MARK: – OCR
 
     private var ocrTab: some View {
+        // Rozdělené do menších computed properties — jediný velký Form přetěžoval
+        // SwiftUI type-checker ("unable to type-check this expression in reasonable time").
         Form {
-            Section {
-                Picker("Backend", selection: Binding(
-                    get: { vm.config.ocrBackend },
-                    set: { vm.setOCRBackend($0) }
-                )) {
-                    ForEach(SHOCRBackend.allCases) { backend in
-                        Text(backend.title).tag(backend)
-                    }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            } header: {
-                Text("OCR backend")
-            } footer: {
-                Text("Apple Vision běží lokálně bez AI serveru. oMLX/VLM posílá skenované PDF stránky do vybraného OCR/VLM modelu přes OpenAI-compatible chat completions. Vision→VLM zkusí nejdřív Vision a teprve pokud neuspěje, sáhne po VLM. ocrmypdf je lokální OCR přes tesseract bez AI serveru; když není k dispozici, použije se Apple Vision.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Toggle(isOn: $vm.config.officeConversionEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Konverze office dokumentů (pandoc)")
-                        Text("DOCX, ODT, RTF, HTML, EPUB se převedou na text přes pandoc.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Toggle(isOn: $vm.config.popplerPDFTextEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Extrakce PDF textu přes pdftotext (-layout)")
-                        Text("Místo PDFKit použije pdftotext; lépe zachová sloupce a tabulky.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Toggle(isOn: $vm.config.spreadsheetConversionEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Konverze tabulek (XLSX/XLS) přes csvkit")
-                        Text("Tabulky se převedou na CSV přes in2csv.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                LabeledContent("pandoc") {
-                    Text(pandocStatusText).foregroundStyle(.secondary)
-                }
-                LabeledContent("pdftotext") {
-                    Text(pdftotextStatusText).foregroundStyle(.secondary)
-                }
-                LabeledContent("in2csv") {
-                    Text(in2csvStatusText).foregroundStyle(.secondary)
-                }
-                LabeledContent("ocrmypdf") {
-                    Text(ocrmypdfStatusText).foregroundStyle(.secondary)
-                }
-                LabeledContent("tesseract") {
-                    Text(tesseractStatusText).foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Lokální nástroje")
-            } footer: {
-                Text("Nástroje běží lokálně. Pokud nejsou k dispozici, použije se nativní zpracování (PDFKit/Vision).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            ocrBackendSection
+            ocrmypdfConfigSection
+            localToolsSection
+            thirdPartyLicenseSection
         }
         .formStyle(.grouped)
         .onChange(of: vm.config.officeConversionEnabled) { _, _ in vm.persistAll() }
         .onChange(of: vm.config.popplerPDFTextEnabled) { _, _ in vm.persistAll() }
         .onChange(of: vm.config.spreadsheetConversionEnabled) { _, _ in vm.persistAll() }
+        // Během psaní debounced persist (jako u jména serveru) — žádný write
+        // storm, ale ani ztráta editace bez commitu. Při opuštění pole / Enteru
+        // navíc prázdnou hodnotu normalizujeme na default, ať UI i persistence
+        // odpovídají runtime fallbacku.
+        .onChange(of: vm.config.ocrLanguages) { _, _ in vm.persistAllDebounced() }
+        .onChange(of: ocrLanguagesFocused) { _, focused in
+            if !focused { commitOCRLanguages() }
+        }
+        .onChange(of: vm.config.ocrTimeoutSeconds) { _, _ in vm.persistAll() }
         .task {
             // Stav nástrojů se v rámci sezení nemění; probni `--version` jen jednou,
             // ne při každém přepnutí zpět na OCR tab (5 podprocesů pokaždé).
@@ -284,6 +234,120 @@ struct SettingsView: View {
             in2csvStatusText = Self.toolStatusLabel(await registry.status(for: .in2csv))
             ocrmypdfStatusText = Self.toolStatusLabel(await registry.status(for: .ocrmypdf))
             tesseractStatusText = Self.toolStatusLabel(await registry.status(for: .tesseract))
+        }
+    }
+
+    private var ocrBackendSection: some View {
+        Section {
+            Picker("Backend", selection: Binding(
+                get: { vm.config.ocrBackend },
+                set: { vm.setOCRBackend($0) }
+            )) {
+                ForEach(SHOCRBackend.allCases) { backend in
+                    Text(backend.title).tag(backend)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } header: {
+            Text("OCR backend")
+        } footer: {
+            Text("Apple Vision běží lokálně bez AI serveru. oMLX/VLM posílá skenované PDF stránky do vybraného OCR/VLM modelu přes OpenAI-compatible chat completions. Vision→VLM zkusí nejdřív Vision a teprve pokud neuspěje, sáhne po VLM. ocrmypdf je lokální OCR přes tesseract bez AI serveru; když není k dispozici, použije se Apple Vision.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var ocrmypdfConfigSection: some View {
+        Section {
+            LabeledContent("Jazyky") {
+                TextField("ces+slk+deu+pol+eng", text: $vm.config.ocrLanguages)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 240)
+                    .focused($ocrLanguagesFocused)
+                    .onSubmit { commitOCRLanguages() }
+            }
+            Stepper(
+                value: $vm.config.ocrTimeoutSeconds,
+                in: 60...3_600,
+                step: 60
+            ) {
+                LabeledContent("Timeout") {
+                    Text(formatTimeout(vm.config.ocrTimeoutSeconds))
+                        .monospacedDigit()
+                }
+            }
+        } header: {
+            Text("OCR ocrmypdf")
+        } footer: {
+            Text("Jazyky tesseractu spojené znakem +. Bundlovaná tessdata obsahují jen ces/slk/deu/pol/eng; jiné jazyky vyžadují doplnit traineddata. Timeout omezuje jeden běh ocrmypdf nad dokumentem. Platí pro backend „ocrmypdf“.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Po dokončení editace jazyků: prázdné/whitespace → default (shodně s
+    /// `SHOcrmypdfProvider`), pak persist. Volá se z onSubmit i při opuštění pole.
+    private func commitOCRLanguages() {
+        let normalized = SHOcrmypdfProvider.normalizedLanguages(vm.config.ocrLanguages)
+        if vm.config.ocrLanguages != normalized { vm.config.ocrLanguages = normalized }
+        vm.persistAll()
+    }
+
+    private var localToolsSection: some View {
+        Section {
+            Toggle(isOn: $vm.config.officeConversionEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Konverze office dokumentů (pandoc)")
+                    Text("DOCX, ODT, RTF, HTML, EPUB se převedou na text přes pandoc.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Toggle(isOn: $vm.config.popplerPDFTextEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Extrakce PDF textu přes pdftotext (-layout)")
+                    Text("Místo PDFKit použije pdftotext; lépe zachová sloupce a tabulky.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Toggle(isOn: $vm.config.spreadsheetConversionEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Konverze tabulek (XLSX/XLS) přes csvkit")
+                    Text("Tabulky se převedou na CSV přes in2csv.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            LabeledContent("pandoc") { Text(pandocStatusText).foregroundStyle(.secondary) }
+            LabeledContent("pdftotext") { Text(pdftotextStatusText).foregroundStyle(.secondary) }
+            LabeledContent("in2csv") { Text(in2csvStatusText).foregroundStyle(.secondary) }
+            LabeledContent("ocrmypdf") { Text(ocrmypdfStatusText).foregroundStyle(.secondary) }
+            LabeledContent("tesseract") { Text(tesseractStatusText).foregroundStyle(.secondary) }
+        } header: {
+            Text("Lokální nástroje")
+        } footer: {
+            Text("Nástroje běží lokálně. Pokud nejsou k dispozici, použije se nativní zpracování (PDFKit/Vision).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var thirdPartyLicenseSection: some View {
+        Section {
+            LabeledContent("pandoc") { Text("GPL-2.0+").foregroundStyle(.secondary) }
+            LabeledContent("poppler (pdftotext)") { Text("GPL-2.0/3.0").foregroundStyle(.secondary) }
+            LabeledContent("csvkit") { Text("MIT").foregroundStyle(.secondary) }
+            LabeledContent("tesseract") { Text("Apache-2.0").foregroundStyle(.secondary) }
+            LabeledContent("ocrmypdf") { Text("MPL-2.0").foregroundStyle(.secondary) }
+            LabeledContent("Ghostscript (gs)") { Text("AGPL-3.0").foregroundStyle(.secondary) }
+        } header: {
+            Text("Licence třetích stran")
+        } footer: {
+            Text("Nástroje se spouštějí jako samostatné procesy. Při distribuci s bundlovaným Ghostscriptem (AGPL-3.0) je nutné zpřístupnit jeho zdrojový kód a přiložit text licence — viz docs/LICENCE_TRETI_STRANY.md.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

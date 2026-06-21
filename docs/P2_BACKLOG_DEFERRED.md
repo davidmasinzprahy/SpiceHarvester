@@ -13,9 +13,8 @@ implementace, scope a očekávaný čas. Slouží jako vstup pro budoucí ticket
 | Save / Load Project commands (interim za DocumentGroup) | ✅ Hotovo |
 | Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo + per-tab title/server + collision detection + Help window scene |
 | Quick Look provider — zdroj + UTI/export | ✅ Zdroj `SHQuickLookPreview.swift` (guarded) + UTI/export `.spice-result.json` hotové; **Xcode extension target chybí** (#1 níže) |
-| Plný DocumentGroup s file-based persistencí | 📋 3-day refactor (#3 níže) |
-| iCloud Drive sync | 📋 Vyžaduje Apple Dev account (#2 níže) |
-| API key migrace na Keychain | 📋 Bezpečnostní vylepšení (#4 níže) |
+| Plný DocumentGroup s file-based persistencí | 📋 3-day refactor (#2 níže) |
+| API key migrace na Keychain | 📋 Bezpečnostní vylepšení (#3 níže) |
 
 ## 1. Quick Look provider pro výstupní JSON
 
@@ -73,57 +72,7 @@ incrementálně bez Xcode IDE.
 
 ---
 
-## 2. iCloud Drive sync
-
-### Co a proč
-Aktuálně všechny cesty (input/output/cache/prompty) jsou lokální. Pro
-multi-device workflow by se hodilo, aby `prompty/` a `output/` mohly žít
-v iCloud Drive a synchronizovat se přes všechny Mac uživatele.
-
-### Proč odloženo
-Vyžaduje **změnu entitlements + container ID + provisioning**:
-- `com.apple.developer.icloud-container-identifiers` v `.entitlements`
-- iCloud capability v Apple Developer accountu
-- `NSUbiquitousContainerIdentifier` v Info.plist
-- File coordination (NSFileCoordinator) pro každé file IO
-
-Bez Apple Developer účtu (signed app) iCloud nelze testovat. Build s
-`Sign to Run Locally` (aktuální stav) iCloud entitlements ignoruje.
-
-### Implementační kroky
-1. V Apple Developer portálu: vytvořit iCloud container `iCloud.DavidMasin.SpiceHarvester`.
-2. V Xcode capabilities: zapnout iCloud → CloudKit + Document storage.
-3. Update obou `.entitlements` souborů:
-   ```xml
-   <key>com.apple.developer.icloud-container-identifiers</key>
-   <array><string>iCloud.DavidMasin.SpiceHarvester</string></array>
-   <key>com.apple.developer.icloud-services</key>
-   <array><string>CloudDocuments</string></array>
-   ```
-4. V `SHFileScanService` a `SHCacheManager`: použít
-   `FileManager.default.url(forUbiquityContainerIdentifier:)` pro výchozí
-   cesty, fallback na local kontejner.
-5. UI: v Settings přidat toggle "Použít iCloud Drive pro výstup / prompty"
-   s explicit opt-in (kvůli ochraně dat).
-6. File coordination wrap v každém read/write.
-
-### Risk
-- iCloud sync má eventual consistency — concurrent edit z dvou Maců =
-  conflict. Potřeba conflict UI.
-- File coordination je verbose, vyžaduje refactor existujícího IO.
-- App Sandbox + iCloud kombinace má edge cases (security-scoped
-  bookmarky vs ubiquity URL).
-
-### Odhad
-- Capability + entitlements + Info.plist: **1 h**
-- File path migration + coordination: **1–2 dny**
-- Conflict handling: **1 den**
-- Cross-device QA: **0.5 dne**
-- Celkem ~**3–4 pracovní dny**.
-
----
-
-## 3. Multi-window support přes DocumentGroup
+## 2. Multi-window support přes DocumentGroup
 
 ### Co a proč
 Aktuálně `WindowGroup` = single window. Pro power-usera s 3 různými
@@ -134,7 +83,6 @@ možnost je ručně přepínat config nebo spustit více instancí přes hack.
 - Cmd+N = nový projekt
 - Cmd+O / File → Open Recent
 - Per-window viewmodel
-- iCloud sync zdarma (přes UIDocument-equivalent NSDocument na macOS)
 - Recents v menu, drag-onto-icon, etc.
 
 ### Proč odloženo
@@ -203,7 +151,6 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 **Co interim NEzvládá oproti plné DocumentGroup:**
 - Žádný File → Open Recent (každé otevření přes panel)
 - Žádný drag .spiceharvester soubor na app icon
-- Žádný iCloud Drive auto-sync
 - Migrace existing UserDefaults config nepotřebuje žádnou — primary window
   načítá UserDefaults dál jako vždy
 
@@ -222,8 +169,6 @@ Místo plné DocumentGroup migrace je nyní implementováno:
    pro nejméně práce (~1 den). Kandidát na další iteraci.
 2. **DocumentGroup** je největší architectural shift — pokud je multi-project
    workflow reálná uživatelská potřeba, tohle je správný čas.
-3. **iCloud Drive** je smysluplný jen *po* DocumentGroup; bez document modelu
-   sync neřeší nic. Pořadí: DocumentGroup → iCloud → Continuity.
 
 ---
 
@@ -241,7 +186,7 @@ Místo plné DocumentGroup migrace je nyní implementováno:
 
 ---
 
-## 4. Migrace API klíčů do Keychainu
+## 3. Migrace API klíčů do Keychainu
 
 ### Co a proč
 `SHServerConfig.apiKey` je dnes plaintext v UserDefaults. Pro pure-localhost LM Studio (default config bez auth) je pole prázdné, takže reálná expozice je nulová — ale jakmile uživatel napojí app na hosted OpenAI-compatible proxy s bearer tokenem (nebo třeba Anthropic-compatible gateway), token přežívá v `~/Library/Containers/.../Preferences/` plaintext na disku.

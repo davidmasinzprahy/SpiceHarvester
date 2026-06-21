@@ -2756,7 +2756,11 @@ final class SHAppViewModel {
             let fallback = SHOpenAIVisionOCRProvider(client: lmClient, server: server, model: model)
             return SHFallbackOCRProvider(primary: SHVisionOCRProvider(), fallback: fallback)
         case .ocrmypdf:
-            return SHFallbackOCRProvider(primary: SHOcrmypdfProvider(), fallback: SHVisionOCRProvider())
+            let ocrmypdf = SHOcrmypdfProvider(
+                languages: config.ocrLanguages,
+                timeout: TimeInterval(config.ocrTimeoutSeconds)
+            )
+            return SHFallbackOCRProvider(primary: ocrmypdf, fallback: SHVisionOCRProvider())
         }
     }
 
@@ -2769,7 +2773,8 @@ final class SHAppViewModel {
         case .appleVisionThenOpenAI:
             return "ocr=appleVisionThenOpenAI;model=\(config.selectedOCRModel)"
         case .ocrmypdf:
-            return "ocr=ocrmypdf"
+            // Jazyky ovlivňují OCR výstup → do signatury (timeout ne).
+            return "ocr=ocrmypdf;lang=\(SHOcrmypdfProvider.normalizedLanguages(config.ocrLanguages))"
         }
     }
 

@@ -129,6 +129,13 @@ struct SHAppConfig: Codable, Sendable {
     var popplerPDFTextEnabled: Bool = false
     /// Konverze tabulek (XLSX/XLS) na CSV přes csvkit (in2csv). Default zapnuto.
     var spreadsheetConversionEnabled: Bool = true
+    /// Jazyky pro OCR backend ocrmypdf (tesseract), ve formátu `+`-spojených
+    /// ISO 639-2 kódů, např. `ces+slk+deu+pol+eng`. Bundlovaná tessdata obsahují
+    /// pouze ces/slk/deu/pol/eng — jiné jazyky vyžadují doplnit traineddata.
+    var ocrLanguages: String = "ces+slk+deu+pol+eng"
+    /// Timeout jednoho běhu ocrmypdf nad dokumentem, v sekundách. Skeny s mnoha
+    /// stránkami mohou trvat dlouho; default 600 s = 10 min.
+    var ocrTimeoutSeconds: Int = 600
 
     init() {}
 
@@ -142,6 +149,7 @@ struct SHAppConfig: Codable, Sendable {
         case lastRunAvgDocumentMs, lastRunAvgPageMs
         case officeConversionEnabled, popplerPDFTextEnabled
         case spreadsheetConversionEnabled
+        case ocrLanguages, ocrTimeoutSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -172,5 +180,7 @@ struct SHAppConfig: Codable, Sendable {
         officeConversionEnabled = try c.decodeIfPresent(Bool.self, forKey: .officeConversionEnabled) ?? true
         popplerPDFTextEnabled = try c.decodeIfPresent(Bool.self, forKey: .popplerPDFTextEnabled) ?? false
         spreadsheetConversionEnabled = try c.decodeIfPresent(Bool.self, forKey: .spreadsheetConversionEnabled) ?? true
+        ocrLanguages = try c.decodeIfPresent(String.self, forKey: .ocrLanguages) ?? "ces+slk+deu+pol+eng"
+        ocrTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .ocrTimeoutSeconds) ?? 600
     }
 }

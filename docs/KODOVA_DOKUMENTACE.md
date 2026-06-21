@@ -61,7 +61,7 @@ Binárky pandoc a poppler se do `.app/Contents/Helpers/` vkládají skriptem `sc
 
 Tabulky `xlsx`/`xls` se převádějí na CSV přes `in2csv` (csvkit) — routa `.csvkit` v `SHDocumentConverter`. Protože `in2csv` je Python skript, packaging bundluje relokovatelný Python + csvkit a tenký wrapper přes `scripts/bundle_python_tools.sh`; cílová cesta je opět `Contents/Helpers/`.
 
-Skenovaná PDF (bez textové vrstvy) lze OCRovat lokálně přes `ocrmypdf` (tesseract + ghostscript) — `SHOcrmypdfProvider` implementuje `SHOCRProviding` a vybírá se OCR backendem `ocrmypdf`; při chybě nebo nedostupnosti nástroje se přes `SHFallbackOCRProvider` použije Apple Vision. Jazyky `ces+slk+deu+pol+eng`. Packaging bundluje ocrmypdf (do Pythonu), ghostscript (AGPL) a tesseract + `tessdata` přes `scripts/bundle_ocr_tools.sh`.
+Skenovaná PDF (bez textové vrstvy) lze OCRovat lokálně přes `ocrmypdf` (tesseract + ghostscript) — `SHOcrmypdfProvider` implementuje `SHOCRProviding` a vybírá se OCR backendem `ocrmypdf`; při chybě nebo nedostupnosti nástroje se přes `SHFallbackOCRProvider` použije Apple Vision. Jazyky (`SHAppConfig.ocrLanguages`, default `ces+slk+deu+pol+eng`) a timeout (`ocrTimeoutSeconds`, default 600 s) jsou konfigurovatelné v Předvolbách → OCR; prázdné jazyky spadnou na default (`SHOcrmypdfProvider.normalizedLanguages`). Jazyky vstupují do cache signatury (změna přepočítá dotčené dokumenty), timeout ne. Packaging bundluje ocrmypdf (do Pythonu), ghostscript (AGPL) a tesseract + `tessdata` přes `scripts/bundle_ocr_tools.sh`; licence bundlovaných nástrojů viz `docs/LICENCE_TRETI_STRANY.md`.
 
 Instalace nástrojů (Homebrew) a zapojení packagingu do Xcode je popsané v [Lokální nástroje](LOKALNI_NASTROJE.md).
 
@@ -198,7 +198,7 @@ Model selection (`selectedInferenceModel`, `selectedEmbeddingModel`, `selectedRe
 - `SHVisionOCRProvider` zůstává default.
 - `SHOpenAIVisionOCRProvider` renderuje stránky přes `SHPDFParser.renderPageImage`, posílá je jako data URL image do `/v1/chat/completions` a vrací přepsaný text.
 - `SHFallbackOCRProvider` používá Vision výsledek po stránkách. Pokud je konkrétní stránka prázdná nebo má méně než `minimumUsableCharacters`, doplní její text z VLM fallbacku; tím se u smíšených PDF neztratí skenované stránky, kde Vision selhal.
-- Cache hash předzpracování zahrnuje OCR backend/model signature, aby změna OCR strategie nepoužila starý text z diskové cache.
+- Cache hash předzpracování zahrnuje OCR backend/model signature, aby změna OCR strategie nepoužila starý text z diskové cache. U backendu `ocrmypdf` je v signatuře i seznam jazyků (`lang=…`), takže změna OCR jazyků dotčené dokumenty přepočítá.
 
 Autorizace: `Bearer` header pokud `apiKey` je vyplněn.
 

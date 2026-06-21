@@ -9,6 +9,10 @@ set -euo pipefail
 
 APP="${1:-${CODESIGNING_FOLDER_PATH:?chybí cesta k .app}}"
 SIGN_ID="${2:-${EXPANDED_CODE_SIGN_IDENTITY:--}}"
+# Ad-hoc podpis (`-`) nelze opatřit secure timestampem; Developer ID ano a
+# notarizace ho vyžaduje. Flag se proto odvodí podle identity automaticky —
+# žádná ruční editace před notarizací.
+if [ "$SIGN_ID" = "-" ]; then TS="--timestamp=none"; else TS="--timestamp"; fi
 HELPERS="$APP/Contents/Helpers"
 PYDIR="$HELPERS/python"
 LIBS="$HELPERS/lib"
@@ -53,9 +57,9 @@ done
 # 4) podepiš dylibs (nemají +x), pak spustitelné a wrappery (hardened runtime)
 if [ -d "$LIBS" ]; then
   find "$LIBS" -type f -name '*.dylib' -exec \
-    codesign --force --options runtime --timestamp=none -s "$SIGN_ID" {} \;
+    codesign --force --options runtime $TS -s "$SIGN_ID" {} \;
 fi
 find "$HELPERS" -maxdepth 1 -type f -perm -u+x -exec \
-  codesign --force --options runtime --timestamp=none -s "$SIGN_ID" {} \;
+  codesign --force --options runtime $TS -s "$SIGN_ID" {} \;
 
 echo "Hotovo: ocrmypdf + gs + tesseract + tessdata v $HELPERS"

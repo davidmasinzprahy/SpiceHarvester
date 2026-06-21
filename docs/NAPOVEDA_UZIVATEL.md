@@ -279,7 +279,9 @@ Otevři přes menu **Spice Harvester → Settings…** nebo zkratkou `Cmd+,`. Na
 - **Timeout požadavku** (60 s – 60 min) — max doba jednoho HTTP požadavku na lokální AI server.
 
 ### Tab OCR
-- **OCR backend** — `Apple Vision` běží lokálně bez AI serveru; `oMLX/VLM` posílá skenované stránky vybranému OCR/VLM modelu; `Vision→VLM` použije VLM jako fallback pro stránky, kde Vision nevrátí použitelný text.
+- **OCR backend** — `Apple Vision` běží lokálně bez AI serveru; `oMLX/VLM` posílá skenované stránky vybranému OCR/VLM modelu; `Vision→VLM` použije VLM jako fallback pro stránky, kde Vision nevrátí použitelný text; `ocrmypdf` je lokální OCR přes tesseract (bez AI serveru), při nedostupnosti spadne na Apple Vision.
+- **OCR ocrmypdf** — *Jazyky* tesseractu spojené znakem `+` (default `ces+slk+deu+pol+eng`; bundlovaná tessdata obsahují jen tyto jazyky). Prázdné pole se po potvrzení vrátí na default. *Timeout* omezuje jeden běh ocrmypdf nad dokumentem. Platí pro backend `ocrmypdf`.
+- **Licence třetích stran** — přehled licencí bundlovaných nástrojů (mj. Ghostscript pod AGPL-3.0); detail v `docs/LICENCE_TRETI_STRANY.md`.
 
 ### Tab Cache
 - **Ignorovat cache LLM odpovědí** — zaškrtni pro vynucení nové inference i při identickém dotazu (užitečné pro non-deterministické modely).

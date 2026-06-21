@@ -94,6 +94,7 @@ Pozor: API klíče jsou zatím uložené v UserDefaults jako plaintext. Migrace 
 | [Uživatelská nápověda](docs/NAPOVEDA_UZIVATEL.md) | Použití aplikace krok za krokem |
 | [Technická dokumentace](docs/KODOVA_DOKUMENTACE.md) | Architektura, pipeline, cache, persistence |
 | [Lokální nástroje](docs/LOKALNI_NASTROJE.md) | Instalace a bundlování pandoc / poppler / csvkit / ocrmypdf / tesseract |
+| [Licence třetích stran](docs/LICENCE_TRETI_STRANY.md) | Licence bundlovaných nástrojů (Ghostscript AGPL ad.) |
 | [Výkon a cache](docs/VYKON_A_CACHE.md) | Nastavení výkonu a chování cache |
 | [Klávesové zkratky](docs/KLÁVESOVÉ_ZKRATKY.md) | Přehled zkratek |
 | [Práce s prompty](docs/PROMPT_TXT_NAVOD.md) | Doporučený formát promptů |

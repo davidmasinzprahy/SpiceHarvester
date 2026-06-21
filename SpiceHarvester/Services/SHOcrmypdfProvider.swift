@@ -6,10 +6,23 @@ import Foundation
 final class SHOcrmypdfProvider: SHOCRProviding, Sendable {
     private let runtime: SHToolRuntime
     private let languages: String
+    private let timeout: TimeInterval
 
-    init(runtime: SHToolRuntime = SHToolRuntime(), languages: String = "ces+slk+deu+pol+eng") {
+    init(runtime: SHToolRuntime = SHToolRuntime(),
+         languages: String = "ces+slk+deu+pol+eng",
+         timeout: TimeInterval = 600) {
         self.runtime = runtime
-        self.languages = languages
+        self.languages = Self.normalizedLanguages(languages)
+        self.timeout = timeout
+    }
+
+    /// Default jazyky odpovídající bundlovaným tessdata.
+    static let defaultLanguages = "ces+slk+deu+pol+eng"
+
+    /// Prázdné/whitespace jazyky by ocrmypdf odmítl; spadni na default.
+    static func normalizedLanguages(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? defaultLanguages : trimmed
     }
 
     func extractText(from fileURL: URL) async throws -> [String] {
@@ -25,7 +38,7 @@ final class SHOcrmypdfProvider: SHOCRProviding, Sendable {
 
         // --force-ocr: skeny rasterizuj a vždy OCRuj (vstup nemá použitelnou textovou vrstvu).
         let args = ["-l", languages, "--force-ocr", "--sidecar", sidecar.path, fileURL.path, outputPDF.path]
-        guard let result = try? await runtime.run(.ocrmypdf, arguments: args, timeout: 600),
+        guard let result = try? await runtime.run(.ocrmypdf, arguments: args, timeout: timeout),
               result.exitCode == 0,
               let text = try? String(contentsOf: sidecar, encoding: .utf8) else {
             return []

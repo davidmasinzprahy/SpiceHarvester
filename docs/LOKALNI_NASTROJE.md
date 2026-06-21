@@ -99,12 +99,18 @@ ls "$APP/Contents/Helpers"
 ## Důležité poznámky
 
 - **ghostscript je AGPL.** Pokud aplikaci distribuuješ s bundlovaným `gs`,
-  uveď to v licenčních podmínkách / acknowledgements aplikace.
-- **Notarizace:** packaging skripty používají `codesign --timestamp=none` pro
-  rychlé vývojové buildy. Před první notarizovanou distribucí přepni ve všech
-  třech skriptech `--timestamp=none` na `--timestamp` (vyžaduje síť pro Apple TSA).
-- **OCR jazyky:** bundlují se jen `ces`, `slk`, `deu`, `pol`, `eng` (+ `osd` pro
-  detekci orientace). Tessdata pro další jazyky doplň do `bundle_ocr_tools.sh`.
+  uveď to v licenčních podmínkách / acknowledgements aplikace. Licenční přehled
+  všech bundlovaných nástrojů: [LICENCE_TRETI_STRANY.md](LICENCE_TRETI_STRANY.md);
+  v aplikaci viz **Předvolby → OCR → Licence třetích stran**.
+- **Notarizace:** packaging skripty odvozují codesign timestamp flag podle
+  podpisové identity — ad-hoc (`-`) → `--timestamp=none` (rychlé dev buildy),
+  Developer ID → `--timestamp` (secure timestamp z Apple TSA, vyžaduje síť).
+  Notarizace běží jen s Developer ID, takže timestamp dostane automaticky bez
+  ruční editace skriptů.
+- **OCR jazyky:** jazyky pro ocrmypdf se nastavují v aplikaci (**Předvolby → OCR
+  → OCR ocrmypdf**), default `ces+slk+deu+pol+eng`. Bundlují se ale jen tessdata
+  pro `ces`, `slk`, `deu`, `pol`, `eng` (+ `osd` pro detekci orientace) — pro
+  další jazyky doplň traineddata do `bundle_ocr_tools.sh`.
 - **Velikost `.app`:** Python runtime + tesseract + ghostscript + tessdata
   výrazně zvětší výsledný balík (stovky MB).
 - **Cache:** verze nástrojů vstupují do cache signatury — po upgradu nástroje se

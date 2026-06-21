@@ -479,6 +479,6 @@ python3 scripts/check_contributor_hygiene.py
 
 ## Společné dořešit po všech fázích (backlog)
 
-- Před první **notarizací** přepnout `--timestamp=none` → `--timestamp` ve `bundle_tools.sh`, `bundle_python_tools.sh`, `bundle_ocr_tools.sh`.
-- ghostscript AGPL → licenční sekce aplikace.
-- Zvážit konfigurovatelné OCR jazyky a timeout ocrmypdf (teď napevno 600 s).
+- ✅ **Timestamp pro notarizaci** — `bundle_*.sh` odvozují codesign flag podle identity: ad-hoc (`-`) → `--timestamp=none`, Developer ID → `--timestamp`. Notarizace tak timestamp dostane automaticky, bez ruční editace.
+- ✅ **ghostscript AGPL** — licenční sekce v aplikaci (Předvolby → OCR → Licence třetích stran) + [docs/LICENCE_TRETI_STRANY.md](../../LICENCE_TRETI_STRANY.md).
+- ✅ **Konfigurovatelné OCR jazyky a timeout ocrmypdf** — `SHAppConfig.ocrLanguages` / `ocrTimeoutSeconds`, UI v Předvolby → OCR → „OCR ocrmypdf". Jazyky vstupují do cache signatury.

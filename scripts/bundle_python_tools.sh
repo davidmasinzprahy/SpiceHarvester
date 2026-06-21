@@ -10,6 +10,10 @@ set -euo pipefail
 
 APP="${1:-${CODESIGNING_FOLDER_PATH:?chybí cesta k .app}}"
 SIGN_ID="${2:-${EXPANDED_CODE_SIGN_IDENTITY:--}}"
+# Ad-hoc podpis (`-`) nelze opatřit secure timestampem; Developer ID ano a
+# notarizace ho vyžaduje. Flag se proto odvodí podle identity automaticky —
+# žádná ruční editace před notarizací.
+if [ "$SIGN_ID" = "-" ]; then TS="--timestamp=none"; else TS="--timestamp"; fi
 PBS_URL="${PBS_URL:?nastav PBS_URL na python-build-standalone tarball}"
 HELPERS="$APP/Contents/Helpers"
 PYDIR="$HELPERS/python"
@@ -43,7 +47,7 @@ chmod +x "$HELPERS/in2csv"
 
 # 4) Podepiš všechny Mach-O (python binárky, .so moduly) i wrapper
 find "$PYDIR" -type f \( -name '*.so' -o -name '*.dylib' -o -perm -u+x \) -exec \
-  codesign --force --options runtime --timestamp=none -s "$SIGN_ID" {} \; 2>/dev/null || true
-codesign --force --options runtime --timestamp=none -s "$SIGN_ID" "$HELPERS/in2csv"
+  codesign --force --options runtime $TS -s "$SIGN_ID" {} \; 2>/dev/null || true
+codesign --force --options runtime $TS -s "$SIGN_ID" "$HELPERS/in2csv"
 
 echo "Hotovo: Python + csvkit v $PYDIR, wrapper $HELPERS/in2csv"
