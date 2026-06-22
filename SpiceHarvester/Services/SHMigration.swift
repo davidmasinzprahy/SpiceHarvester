@@ -11,7 +11,6 @@ enum SHMigration {
         content.outputFolder = c.outputFolder
         content.cacheFolder = c.cacheFolder
         content.promptFolder = c.promptFolder
-        content.folderBookmarks = c.folderBookmarks
         content.selectedServerID = c.selectedServerID
         content.selectedInferenceModel = c.selectedInferenceModel
         content.selectedEmbeddingModel = c.selectedEmbeddingModel

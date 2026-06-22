@@ -881,7 +881,6 @@ final class SHDocumentViewModel {
         config.outputFolder = c.outputFolder
         config.cacheFolder = c.cacheFolder
         config.promptFolder = c.promptFolder
-        config.folderBookmarks = c.folderBookmarks
         config.selectedServerID = c.selectedServerID
         config.selectedInferenceModel = c.selectedInferenceModel
         config.selectedEmbeddingModel = c.selectedEmbeddingModel
@@ -911,7 +910,6 @@ final class SHDocumentViewModel {
         c.outputFolder = config.outputFolder
         c.cacheFolder = config.cacheFolder
         c.promptFolder = config.promptFolder
-        c.folderBookmarks = config.folderBookmarks
         c.selectedServerID = config.selectedServerID
         c.selectedInferenceModel = config.selectedInferenceModel
         c.selectedEmbeddingModel = config.selectedEmbeddingModel

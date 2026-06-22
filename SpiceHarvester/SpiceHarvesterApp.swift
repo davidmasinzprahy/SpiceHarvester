@@ -67,22 +67,21 @@ struct SpiceHarvesterApp: App {
             // └──────────────────────────────────────────────────────────┘
 
             // App-first: projekt se otevírá/ukládá explicitně, uživatel volí cestu.
+            // Obě operace pohromadě nahrazují sekci „Nový" v menu File.
             CommandGroup(replacing: .newItem) {
                 Button("Otevřít projekt…") {
                     targetVM?.openProject()
                 }
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(targetVM?.isRunning == true)
-            }
-            CommandGroup(after: .saveItem) {
+
                 Button("Uložit projekt jako…") {
                     _ = targetVM?.saveProjectAs()
                 }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(targetVM?.isRunning == true)
-
-                Divider()
-
+            }
+            CommandGroup(after: .saveItem) {
                 Button("Otevřít výsledek...") {
                     _ = targetVM?.openSpiceResultFile()
                 }

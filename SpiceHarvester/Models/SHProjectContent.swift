@@ -7,8 +7,9 @@ struct SHProjectContent: Codable, Sendable {
     var outputFolder: String = ""
     var cacheFolder: String = ""
     var promptFolder: String = ""
-    /// Security-scoped bookmarky pro cesty projektu (přežijí restart v sandboxu).
-    var folderBookmarks: [String: Data] = [:]
+    // Pozn.: security-scoped bookmarky složek se do projektu ZÁMĚRNĚ neukládají —
+    // jsou machine-specific a dělaly by .spiceharvester.json nepřenositelný.
+    // Přístup ke složkám drží app-level store (recentFolderBookmarks) / re-pick.
     var selectedServerID: UUID?
     var selectedInferenceModel: String = ""
     var selectedEmbeddingModel: String = ""
@@ -22,7 +23,7 @@ struct SHProjectContent: Codable, Sendable {
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case inputFolder, outputFolder, cacheFolder, promptFolder, folderBookmarks
+        case inputFolder, outputFolder, cacheFolder, promptFolder
         case selectedServerID, selectedInferenceModel, selectedEmbeddingModel
         case selectedRerankerModel, selectedOCRModel, extractionMode
         case currentPrompt, lastLoadedPromptName, promptHistory
@@ -34,7 +35,6 @@ struct SHProjectContent: Codable, Sendable {
         outputFolder = try c.decodeIfPresent(String.self, forKey: .outputFolder) ?? ""
         cacheFolder = try c.decodeIfPresent(String.self, forKey: .cacheFolder) ?? ""
         promptFolder = try c.decodeIfPresent(String.self, forKey: .promptFolder) ?? ""
-        folderBookmarks = try c.decodeIfPresent([String: Data].self, forKey: .folderBookmarks) ?? [:]
         selectedServerID = try c.decodeIfPresent(UUID.self, forKey: .selectedServerID)
         selectedInferenceModel = try c.decodeIfPresent(String.self, forKey: .selectedInferenceModel) ?? ""
         selectedEmbeddingModel = try c.decodeIfPresent(String.self, forKey: .selectedEmbeddingModel) ?? ""
