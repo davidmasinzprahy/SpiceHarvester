@@ -6,9 +6,7 @@ import AppKit
 /// OCR backend, and inference-cache bypass. Keeping these out of the main
 /// window de-clutters the configuration column without losing access.
 struct SettingsView: View {
-    @Bindable var vm: SHDocumentViewModel
-    /// App-level předvolby (sdílené). Bindujeme přímo na `global`, ne přes
-    /// `vm.global` (to je `let` a binding přes něj kompilátor odmítá).
+    /// App-level předvolby (sdílené). Settings je app-level scéna bez document VM.
     @Bindable var global: SHGlobalState
     @State private var selectedTab: SettingsTab = .performance
     /// Substring search across all tabs. Each tab declares its own
@@ -200,15 +198,14 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: global.prefs.maxConcurrentInference) { _, _ in vm.persistAll() }
-        .onChange(of: global.prefs.maxConcurrentPDFWorkers) { _, _ in vm.persistAll() }
-        .onChange(of: global.prefs.throttleDelayMs) { _, _ in vm.persistAll() }
-        .onChange(of: global.prefs.modelContextTokens) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.maxConcurrentInference) { _, _ in global.savePreferences() }
+        .onChange(of: global.prefs.maxConcurrentPDFWorkers) { _, _ in global.savePreferences() }
+        .onChange(of: global.prefs.throttleDelayMs) { _, _ in global.savePreferences() }
+        .onChange(of: global.prefs.modelContextTokens) { _, _ in global.savePreferences() }
         .onChange(of: global.prefs.requestTimeoutSeconds) { _, _ in
-            // Rebuild URLSession so the new timeout kicks in on the very next
-            // request; URLSessionConfiguration is captured at session creation.
-            vm.rebuildLMClient()
-            vm.persistAll()
+            // Otevřené dokumenty si nový timeout načtou z `global.prefs` při
+            // příštím rebuildu LM klienta (před během / po změně serveru).
+            global.savePreferences()
         }
     }
 
@@ -224,18 +221,18 @@ struct SettingsView: View {
             thirdPartyLicenseSection
         }
         .formStyle(.grouped)
-        .onChange(of: global.prefs.officeConversionEnabled) { _, _ in vm.persistAll() }
-        .onChange(of: global.prefs.popplerPDFTextEnabled) { _, _ in vm.persistAll() }
-        .onChange(of: global.prefs.spreadsheetConversionEnabled) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.officeConversionEnabled) { _, _ in global.savePreferences() }
+        .onChange(of: global.prefs.popplerPDFTextEnabled) { _, _ in global.savePreferences() }
+        .onChange(of: global.prefs.spreadsheetConversionEnabled) { _, _ in global.savePreferences() }
         // Během psaní debounced persist (jako u jména serveru) — žádný write
         // storm, ale ani ztráta editace bez commitu. Při opuštění pole / Enteru
         // navíc prázdnou hodnotu normalizujeme na default, ať UI i persistence
         // odpovídají runtime fallbacku.
-        .onChange(of: global.prefs.ocrLanguages) { _, _ in vm.persistAllDebounced() }
+        .onChange(of: global.prefs.ocrLanguages) { _, _ in global.savePreferences() }
         .onChange(of: ocrLanguagesFocused) { _, focused in
             if !focused { commitOCRLanguages() }
         }
-        .onChange(of: global.prefs.ocrTimeoutSeconds) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.ocrTimeoutSeconds) { _, _ in global.savePreferences() }
         .task {
             // Stav nástrojů se v rámci sezení nemění; probni `--version` jen jednou,
             // ne při každém přepnutí zpět na OCR tab (5 podprocesů pokaždé).
@@ -260,7 +257,7 @@ struct SettingsView: View {
         Section {
             Picker("Backend", selection: Binding(
                 get: { global.prefs.ocrBackend },
-                set: { vm.setOCRBackend($0) }
+                set: { global.prefs.ocrBackend = $0; global.savePreferences() }
             )) {
                 ForEach(SHOCRBackend.allCases) { backend in
                     Text(backend.title).tag(backend)
@@ -328,7 +325,7 @@ struct SettingsView: View {
     private func commitOCRLanguages() {
         let normalized = SHOcrmypdfProvider.normalizedLanguages(global.prefs.ocrLanguages)
         if global.prefs.ocrLanguages != normalized { global.prefs.ocrLanguages = normalized }
-        vm.persistAll()
+        global.savePreferences()
     }
 
     private var localToolsSection: some View {
@@ -406,20 +403,15 @@ struct SettingsView: View {
             }
 
             Section {
-                Button(role: .destructive) {
-                    Task { await vm.clearCache() }
-                } label: {
-                    Label("Vyčistit cache", systemImage: "trash")
-                }
-                .help("Smaže dočasné OCR výsledky i uložené LLM odpovědi. Při dalším běhu se vše počítá od nuly.")
-            } footer: {
-                Text("Pozor: cache je sdílená mezi běhy a nelze ji vrátit zpět.")
+                Text("Cache je per-projekt. „Vyčistit cache“ najdeš v menu **Pipeline** (cílí na aktivní okno projektu).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } header: {
+                Text("Cache projektu")
             }
         }
         .formStyle(.grouped)
-        .onChange(of: global.prefs.bypassInferenceCache) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.bypassInferenceCache) { _, _ in global.savePreferences() }
     }
 
     private static func toolStatusLabel(_ status: SHToolRegistry.Status) -> String {

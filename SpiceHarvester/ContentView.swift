@@ -3,7 +3,14 @@ import AppKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @Bindable var vm: SHDocumentViewModel
+    @State private var vm: SHDocumentViewModel
+    /// Navázaný projektový dokument (DocumentGroup). Drženo kvůli identitě okna.
+    let document: SHProjectDocument
+
+    init(document: SHProjectDocument, global: SHGlobalState) {
+        self.document = document
+        _vm = State(initialValue: SHDocumentViewModel(document: document, global: global))
+    }
     /// Opens auxiliary windows (`help`). Help lives in its own scene
     /// (not a `.sheet`) so it doesn't get trapped behind the active
     /// tab when the user has tabbed several SpiceHarvester windows
@@ -149,8 +156,13 @@ struct ContentView: View {
         .onAppear {
             vm.refreshInputFolderStats()
             installTabKeyMonitor()
+            // Document-based: zaměřené/první okno slouží jako „primary" pro
+            // AppIntents (Shortcuts), které nemají referenci na document VM.
+            (NSApp.delegate as? SHAppDelegate)?.primaryViewModel = vm
         }
         .onDisappear { removeTabKeyMonitor() }
+        // Menu commands (Pipeline, Otevřít výstup…) cílí na zaměřený dokument.
+        .focusedSceneValue(\.focusedViewModel, vm)
         .onChange(of: vm.config.inputFolder) { _, _ in
             vm.refreshInputFolderStats()
         }

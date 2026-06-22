@@ -28,12 +28,9 @@ extension FocusedValues {
 @main
 struct SpiceHarvesterApp: App {
     @NSApplicationDelegateAdaptor(SHAppDelegate.self) var appDelegate
-    /// Primary window's view-model + help-sheet flag. Settings scene shares
-    /// this instance so changes in the Settings sheet (Cmd+,) reflect in the
-    /// primary window's runtime state. Secondary scratch windows (Cmd+Shift+N)
-    /// have their own per-window view-model so configurations don't fight
-    /// over the same UserDefaults slot.
-    @State private var vm = SHDocumentViewModel()
+    /// App-level sdílený stav (server registr, prefs, recents, služby). Jedna
+    /// instance pro celou appku, injektovaná do každého document okna i do Settings.
+    @State private var global = SHGlobalState()
     /// Resolves to the focused window's view-model (primary or scratch).
     /// Menu commands route through this so project ops act on the
     /// expected window. Falls back to the App-level `vm` (primary) when
@@ -48,7 +45,10 @@ struct SpiceHarvesterApp: App {
     /// View-model that menu commands should operate on — focused window
     /// when one is up, primary as fallback. Centralised so every menu
     /// item uses the same routing without scattering ternaries.
-    private var targetVM: SHDocumentViewModel { focusedVM ?? vm }
+    /// V document-based appce není „primary" okno — menu commands cílí na
+    /// zaměřený dokument. `nil`, když není v popředí žádné document okno
+    /// (např. Settings/Help). Commands se pak vypnou.
+    private var targetVM: SHDocumentViewModel? { focusedVM }
 
     /// Compact label for a recent-project URL shown in the
     /// `File → Otevřít nedávné…` submenu. Strips the redundant
@@ -77,16 +77,9 @@ struct SpiceHarvesterApp: App {
     }
 
     var body: some Scene {
-        WindowGroup(id: "main") {
-            ContentView(vm: vm)
-                .focusedSceneValue(\.focusedViewModel, vm)
-                .onAppear {
-                    appDelegate.primaryViewModel = vm
-                }
+        DocumentGroup(newDocument: { SHProjectDocument() }) { configuration in
+            ContentView(document: configuration.document, global: global)
         }
-        // `.defaultSize` is the SwiftUI fallback for first-launch dimensions; the
-        // AppDelegate below then adapts the actual launch frame to the current screen.
-        .defaultSize(width: 1180, height: 980)
         .commands {
             // ┌──────────────────────────────────────────────────────────┐
             // │ File menu — purely document / project operations.        │
@@ -95,67 +88,20 @@ struct SpiceHarvesterApp: App {
             // │ process-driven apps).                                    │
             // └──────────────────────────────────────────────────────────┘
 
-            // File → Nové okno + Otevřít projekt (Cmd+N replacement;
-            // .newItem default is "New Window" which Spice Harvester
-            // doesn't need — we have scratch via Cmd+Shift+N).
-            CommandGroup(replacing: .newItem) {
-                Button("Nové okno (scratch)") {
-                    openWindow(id: "scratch", value: UUID())
-                }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-
-                Divider()
-
-                Button("Otevřít projekt…") {
-                    let outcome = targetVM.openProject()
-                    SHAppDelegate.handleOpenProjectOutcome(outcome)
-                }
-                .keyboardShortcut("o", modifiers: .command)
-                .disabled(targetVM.isRunning)
-
-                // Open Recent submenu — fed by the focused vm's
-                // `recentProjectURLs`, written on every saveProjectAs /
-                // openProject success. Click → `openProject(at:)`
-                // bypasses NSOpenPanel and uses stored security-scoped
-                // bookmark so the read succeeds across app restarts.
-                Menu("Otevřít nedávné") {
-                    ForEach(Array(targetVM.recentProjectURLs.enumerated()), id: \.element) { _, url in
-                        Button(recentProjectMenuTitle(url)) {
-                            let outcome = targetVM.openProject(at: url)
-                            SHAppDelegate.handleOpenProjectOutcome(outcome)
-                        }
-                        .disabled(targetVM.isRunning)
-                    }
-                    if !targetVM.recentProjectURLs.isEmpty {
-                        Divider()
-                        Button("Vyčistit seznam") {
-                            targetVM.clearRecentProjects()
-                        }
-                    }
-                }
-                .disabled(targetVM.recentProjectURLs.isEmpty)
-            }
-
-            // File → Uložit projekt jako… (Cmd+Shift+S, placed after .saveItem)
+            // New / Open / Open Recent / Save / Save As / Duplicate / Rename
+            // dodává nativně DocumentGroup. Zůstávají jen app-specifické akce.
             CommandGroup(after: .saveItem) {
-                Divider()
-                Button("Uložit projekt jako…") {
-                    _ = targetVM.saveProjectAs()
-                }
-                .keyboardShortcut("s", modifiers: [.command, .shift])
-                .disabled(targetVM.isRunning || !targetVM.canSaveProject)
-
                 Button("Otevřít výsledek...") {
-                    _ = targetVM.openSpiceResultFile()
+                    _ = targetVM?.openSpiceResultFile()
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(targetVM.isRunning || targetVM.loadedResult != nil)
+                .disabled(targetVM == nil || targetVM?.isRunning == true || targetVM?.loadedResult != nil)
 
                 Button("Otevřít výstup ve Finderu") {
-                    targetVM.openOutput()
+                    targetVM?.openOutput()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
-                .disabled(!targetVM.canOpenOutput)
+                .disabled(targetVM?.canOpenOutput != true)
             }
 
             // ┌──────────────────────────────────────────────────────────┐
@@ -167,62 +113,60 @@ struct SpiceHarvesterApp: App {
             // └──────────────────────────────────────────────────────────┘
             CommandMenu("Pipeline") {
                 Button("Spustit") {
-                    Task { await targetVM.runAll() }
+                    Task { await targetVM?.runAll() }
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(!targetVM.canRunAll || targetVM.isRunning || targetVM.loadedResult != nil)
+                .disabled(targetVM?.canRunAll != true || targetVM?.isRunning == true || targetVM?.loadedResult != nil)
 
                 Button("Přerušit") {
-                    targetVM.cancelRun()
+                    targetVM?.cancelRun()
                 }
                 .keyboardShortcut(".", modifiers: .command)
-                .disabled(!targetVM.isRunning)
+                .disabled(targetVM?.isRunning != true)
 
                 Divider()
 
                 Button("Předzpracování") {
-                    Task { await targetVM.runPreprocessing() }
+                    Task { await targetVM?.runPreprocessing() }
                 }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
-                .disabled(!targetVM.canRunPreprocessing || targetVM.isRunning || targetVM.loadedResult != nil)
+                .disabled(targetVM?.canRunPreprocessing != true || targetVM?.isRunning == true || targetVM?.loadedResult != nil)
 
                 Button("Extrakce") {
-                    Task { await targetVM.runExtraction() }
+                    Task { await targetVM?.runExtraction() }
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(!targetVM.canRunExtraction || targetVM.isRunning || targetVM.loadedResult != nil)
+                .disabled(targetVM?.canRunExtraction != true || targetVM?.isRunning == true || targetVM?.loadedResult != nil)
 
                 Divider()
 
-                // Režim extrakce zkratky. Moved from .toolbar placement
-                // — mode is pipeline-behavior config, not view state.
-                //
-                // Gating on `focusedVM == nil` disables Cmd+1/2/3 when
-                // the Settings scene is in front (Settings doesn't
-                // publish `.focusedViewModel`). Without this, the user
-                // could accidentally flip the main window's extraction
-                // mode while typing in a Settings text field — the
-                // shortcut is bound globally by SwiftUI commands.
-                Button("Režim FAST") { targetVM.config.extractionMode = .fast }
-                    .keyboardShortcut("1", modifiers: .command)
-                    .disabled(focusedVM == nil || targetVM.isRunning || targetVM.loadedResult != nil)
-                Button("Režim SEARCH") { targetVM.config.extractionMode = .search }
-                    .keyboardShortcut("2", modifiers: .command)
-                    .disabled(focusedVM == nil || targetVM.isRunning || targetVM.loadedResult != nil)
-                Button("Režim CONSOLIDATE") { targetVM.config.extractionMode = .consolidate }
-                    .keyboardShortcut("3", modifiers: .command)
-                    .disabled(focusedVM == nil || targetVM.isRunning || targetVM.loadedResult != nil)
-
-                Divider()
-
-                // Manual server ping outside the 30 s ambient health
-                // watcher loop. Useful right after restarting LM Studio:
-                // user clicks Re-check, gets immediate green/red feedback
-                // instead of waiting up to 30 s for the next scheduled ping.
-                Button("Znovu ověřit zdraví serveru") {
-                    Task { await targetVM.recheckServerNow() }
+                // Cache je per-projekt → akce patří k zaměřenému dokumentu, ne do
+                // app-level Settings (proto přesunuto sem z Cache tabu).
+                Button("Vyčistit cache") {
+                    Task { await targetVM?.clearCache() }
                 }
-                .disabled(!targetVM.isSelectedServerVerified || targetVM.isRunning)
+                .disabled(targetVM == nil || targetVM?.isRunning == true)
+
+                Divider()
+
+                // Režim extrakce zkratky. `focusedVM == nil` vypne Cmd+1/2/3,
+                // když je v popředí Settings/Help (nepublikují focusedViewModel).
+                Button("Režim FAST") { targetVM?.config.extractionMode = .fast }
+                    .keyboardShortcut("1", modifiers: .command)
+                    .disabled(focusedVM == nil || targetVM?.isRunning == true || targetVM?.loadedResult != nil)
+                Button("Režim SEARCH") { targetVM?.config.extractionMode = .search }
+                    .keyboardShortcut("2", modifiers: .command)
+                    .disabled(focusedVM == nil || targetVM?.isRunning == true || targetVM?.loadedResult != nil)
+                Button("Režim CONSOLIDATE") { targetVM?.config.extractionMode = .consolidate }
+                    .keyboardShortcut("3", modifiers: .command)
+                    .disabled(focusedVM == nil || targetVM?.isRunning == true || targetVM?.loadedResult != nil)
+
+                Divider()
+
+                Button("Znovu ověřit zdraví serveru") {
+                    Task { await targetVM?.recheckServerNow() }
+                }
+                .disabled(targetVM?.isSelectedServerVerified != true || targetVM?.isRunning == true)
             }
 
             CommandGroup(replacing: .help) {
@@ -241,24 +185,11 @@ struct SpiceHarvesterApp: App {
             }
         }
 
-        // Settings sheet is intentionally always bound to the *primary*
-        // window's view-model. Performance prefs (concurrency, throttle,
-        // request timeout, OCR backend, cache toggle) are app-level
-        // global tuning — having Settings follow the focused window
-        // would mean scratch windows could silently override those
-        // values, surprising the next primary-window run. By design.
+        // Settings je app-level (Cmd+,) — binduje na sdílený `global` (prefs).
+        // Per-projekt akce (Vyčistit cache) jsou v Pipeline menu, ne tady.
         Settings {
-            SettingsView(vm: vm, global: vm.global)
+            SettingsView(global: global)
         }
-
-        // Scratch / secondary window. Each open creates a fresh window
-        // with its own ContentView + view-model (see SHScratchRoot)
-        // because WindowGroup(for: UUID.self) emits one window per
-        // unique value.
-        WindowGroup(id: "scratch", for: UUID.self) { _ in
-            SHScratchRoot()
-        }
-        .defaultSize(width: 1180, height: 980)
 
         // Help window — `Window` (not `WindowGroup`) because Help is
         // semantically a singleton: pressing Cmd+? twice should
@@ -274,28 +205,6 @@ struct SpiceHarvesterApp: App {
             HelpWindowView()
         }
         .defaultSize(width: 760, height: 720)
-    }
-}
-
-/// Hosts a scratch ContentView with its own view-model. Doesn't persist
-/// config back to UserDefaults — see the rationale on the `Nové okno`
-/// menu item.
-///
-/// `@State` initializer is lazy on macOS 14+/iOS 17+ — the
-/// `SHDocumentViewModel(persistenceMode: .scratch)` expression evaluates once
-/// per view instance, not on every body recomputation. Our deployment
-/// target is macOS 15.6 so this pattern is safe; on older OS versions
-/// SwiftUI would re-evaluate the initializer on rebuild and we'd need
-/// the `@State var vm: SHDocumentViewModel?` + `.onAppear` workaround.
-struct SHScratchRoot: View {
-    @State private var vm = SHDocumentViewModel(persistenceMode: .scratch)
-
-    var body: some View {
-        ContentView(vm: vm)
-            // Same routing for project ops: Open Recent / Save Project
-            // / Open Project in menu now act on whichever window is
-            // focused, not the App-level primary.
-            .focusedSceneValue(\.focusedViewModel, vm)
     }
 }
 
@@ -514,17 +423,9 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
         switch kind {
         case .result:
             _ = vm.openSpiceResultFile(url)
-        case .project:
-            guard !vm.isRunning else {
-                let alert = NSAlert()
-                alert.messageText = "Úloha běží"
-                alert.informativeText = "Projekt nelze otevřít během zpracování. Počkej na dokončení nebo běh přeruš."
-                alert.alertStyle = .informational
-                alert.runModal()
-                return
-            }
-            SHAppDelegate.handleOpenProjectOutcome(vm.openProject(at: url))
-        case .unsupported:
+        case .project, .unsupported:
+            // Projekty (`*.spiceharvester.json`) otevírá nativně DocumentGroup;
+            // tady je neřešíme, ať nedojde k dvojímu otevření.
             return
         }
     }
