@@ -732,6 +732,17 @@ final class SHDocumentViewModel {
     }
     private let persistenceMode: PersistenceMode
 
+    /// Tokeny NotificationCenter observerů registrovaných v initu. V document-based
+    /// appce vzniká VM per okno, takže bez odregistrace v deinitu by se bloky
+    /// hromadily na celý život procesu. `deinit` je uklidí.
+    /// `nonisolated(unsafe)`: zapisuje se jen v initu (MainActor), čte při dealloc
+    /// v nonisolated deinitu — žádný souběh.
+    nonisolated(unsafe) private var notificationTokens: [NSObjectProtocol] = []
+
+    deinit {
+        notificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
     init(persistenceMode: PersistenceMode = .persistent, global: SHGlobalState? = nil) {
         self.persistenceMode = persistenceMode
         // Fáze 4 sem injektuje sdílenou instanci z App; zatím se vytvoří lokálně.
@@ -822,7 +833,7 @@ final class SHDocumentViewModel {
         // force-quits / crashes / hits the power button.
         // The notification's user-info closure isn't main-actor-isolated, so we
         // hop back via `MainActor.run` before touching `persistAll()`.
-        NotificationCenter.default.addObserver(
+        notificationTokens.append(NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
@@ -830,7 +841,7 @@ final class SHDocumentViewModel {
             Task { @MainActor in
                 self?.persistAll()
             }
-        }
+        })
 
         // AppIntents bridge: the Shortcuts app / Siri / Spotlight invoke our
         // intents without holding a reference to this view-model. The intents
@@ -852,7 +863,7 @@ final class SHDocumentViewModel {
             // — removed the NotificationCenter dance that had two
             // races: (1) primary + scratch claiming the same broadcast,
             // (2) the intent observer matching the wrong vm's reply.
-            NotificationCenter.default.addObserver(
+            notificationTokens.append(NotificationCenter.default.addObserver(
                 forName: SHIntentNotifications.openOutput,
                 object: nil,
                 queue: .main
@@ -860,7 +871,7 @@ final class SHDocumentViewModel {
                 Task { @MainActor in
                     self?.openOutput()
                 }
-            }
+            })
         }
 
         // Register in the process-wide live registry so a
@@ -898,6 +909,16 @@ final class SHDocumentViewModel {
         config.currentPrompt = c.currentPrompt
         config.lastLoadedPromptName = c.lastLoadedPromptName
         promptHistory = c.promptHistory
+
+        // Re-heal: když projekt odkazuje na server, který už v registru není
+        // (smazaný v jiném okně / minulém spuštění), spadni na první dostupný,
+        // ať okno tiše nezůstane bez vybraného serveru.
+        let hasMatchingServer = config.selectedServerID.flatMap { id in
+            servers.first(where: { $0.id == id })
+        } != nil
+        if !hasMatchingServer {
+            config.selectedServerID = servers.first?.id
+        }
     }
 
     /// Aktuální obsah projektu z pracovního stavu (pro zápis do dokumentu →

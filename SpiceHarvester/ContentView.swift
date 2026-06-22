@@ -166,6 +166,15 @@ struct ContentView: View {
         .onChange(of: vm.config.inputFolder) { _, _ in
             vm.refreshInputFolderStats()
         }
+        // App prefs jsou globální (Settings) — když je uživatel změní, otevřená
+        // okna musí zareagovat: nový timeout přestaví LM klienta, změna OCR
+        // backendu přepočítá conflict banner.
+        .onChange(of: vm.global.prefs.requestTimeoutSeconds) { _, _ in
+            vm.rebuildLMClient()
+        }
+        .onChange(of: vm.global.prefs.ocrBackend) { _, _ in
+            vm.scheduleConflictUpdate(after: 0)
+        }
         // Auto-list .md when the prompt folder is set (drop / recents / pick /
         // project restore) so the user doesn't have to click "Načíst" first.
         // Fires after the mutation, by which point the scoped bookmark is
