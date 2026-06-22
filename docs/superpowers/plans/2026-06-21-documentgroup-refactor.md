@@ -10,6 +10,31 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-21-documentgroup-refactor-design.md`
 
+## Stav (2026-06-21)
+
+Hotové a zelené (commitnuté, CI green):
+- ✅ **F1** — `SHProjectContent` + `SHAppPreferences` + `SHPreferencesStore` + `SHMigration.split` + testy.
+- ✅ **F2** — `SHGlobalState` (server registr) + VM pass-through.
+- ✅ **F3** — rename `SHAppViewModel` → `SHDocumentViewModel`.
+- ✅ **F4a** — `SHProjectDocument` (ReferenceFileDocument) + `UTType.spiceHarvesterProject`.
+- ✅ **F4b-i** — app prefs přesunuty do `SHGlobalState`; Settings binduje `$global.prefs`.
+- ✅ **F4b-ii (část)** — VM document-bridge scaffolding (aditivní): `document` property,
+  `convenience init(document:global:)`, `applyProjectContent`/`currentProjectContent`,
+  `persistAll` write-back do dokumentu. Zatím **nezapojeno** do scény.
+
+Zbývá (vyžaduje samostatnou fokusovanou session — je to nedělitelný „big-bang"):
+- 📋 **F4b-ii (zbytek)** — přepnout scénu `WindowGroup`→`DocumentGroup`, `ContentView(document:global:)`
+  konstruuje VM, odstranit scratch `WindowGroup` + custom file/recents commands.
+- 📋 **F5** — Settings plně odpojit od `vm` (per-dokumentové akce ven); AppIntents headless přes Default Project.
+- 📋 **F6** — migrace při startu (legacy → Default Project) + úklid interimu + docs.
+
+**Zjištěná kaskáda (proč je zbytek big-bang):** app-level Settings dnes hostuje
+**per-dokumentové** akce — `Vyčistit cache` (`vm.clearCache()` nad cache složkou
+projektu) a `setOCRBackend` (vedlejší efekty na VM). Ty se musí přesunout do hlavního
+okna (ContentView), jinak Settings nejde odpojit od document-VM. Plus scéna nejde
+půlit (build je rozbitý, dokud není celý přechod hotový). Proto se F4b-ii(zbytek)+F5+F6
+musí udělat společně v jednom kuse.
+
 **Postup:** Fázovaně se zeleným buildem po každé fázi. Fáze 1 je plně konkrétní a aditivní (nemění chování). Fáze 2–6 mají přesné deliverables + acceptance gate; jejich řádkové kroky se rozpracují při exekuci proti aktuálnímu kódu (refactor velkého VM nelze přesně předepsat dopředu, aniž by to byly skryté placeholdery).
 
 ---
