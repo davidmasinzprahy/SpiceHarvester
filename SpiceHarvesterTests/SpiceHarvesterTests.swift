@@ -399,74 +399,6 @@ struct SpiceHarvesterTests {
         #expect(!cleaned[1].cleanedText.lowercased().contains("fakultni nemocnice"))
     }
 
-    // MARK: – Recent projects persistence + cross-window sync
-
-    /// Verifies the init-side restore: a path written to the shared
-    /// `SHRecentProjects` UserDefaults key under a previous launch must
-    /// re-appear in `recentProjectURLs` on the next vm construction.
-    /// Without this roundtrip working, `Otevřít nedávné…` would be
-    /// empty after every app restart.
-    @MainActor
-    @Test func recentProjectURLsRestoredFromUserDefaultsOnInit() async {
-        let recentKey = "SHRecentProjects"
-        let bookmarksKey = "SHProjectBookmarks"
-        let priorPaths = UserDefaults.standard.object(forKey: recentKey)
-        let priorBookmarks = UserDefaults.standard.object(forKey: bookmarksKey)
-        defer {
-            UserDefaults.standard.set(priorPaths, forKey: recentKey)
-            UserDefaults.standard.set(priorBookmarks, forKey: bookmarksKey)
-        }
-
-        let projectPath = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sh-roundtrip-\(UUID().uuidString).spiceharvester.json")
-            .path
-        UserDefaults.standard.set([projectPath], forKey: recentKey)
-        UserDefaults.standard.removeObject(forKey: bookmarksKey)
-
-        let vm = SHDocumentViewModel(persistenceMode: .scratch)
-
-        #expect(vm.recentProjectURLs.map(\.path) == [projectPath])
-    }
-
-    /// `openProject(at:)` called with a path that exists but isn't a
-    /// valid project JSON must drop the URL from the recents list. The
-    /// menu otherwise keeps listing the dead entry and the user gets
-    /// the same error on every click.
-    @MainActor
-    @Test func openProjectForgetsURLWhenJSONInvalid() async throws {
-        let recentKey = "SHRecentProjects"
-        let bookmarksKey = "SHProjectBookmarks"
-        let priorPaths = UserDefaults.standard.object(forKey: recentKey)
-        let priorBookmarks = UserDefaults.standard.object(forKey: bookmarksKey)
-        defer {
-            UserDefaults.standard.set(priorPaths, forKey: recentKey)
-            UserDefaults.standard.set(priorBookmarks, forKey: bookmarksKey)
-        }
-
-        // Write non-project JSON to a temp file. The sniff in
-        // openProject(at:) checks for `schemaVersion` and rejects this
-        // payload as "not a project" rather than letting the Codable
-        // decoder spit out a keyNotFound error.
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sh-bad-\(UUID().uuidString).spiceharvester.json")
-        try "{\"foo\": 1}".data(using: .utf8)!.write(to: url)
-        defer { try? FileManager.default.removeItem(at: url) }
-
-        UserDefaults.standard.set([url.path], forKey: recentKey)
-        UserDefaults.standard.removeObject(forKey: bookmarksKey)
-
-        let vm = SHDocumentViewModel(persistenceMode: .scratch)
-        #expect(vm.recentProjectURLs.map(\.path) == [url.path])
-
-        let outcome = vm.openProject(at: url)
-        if case .failed(let error) = outcome {
-            #expect(error is SHProjectError)
-        } else {
-            Issue.record("Expected .failed outcome, got \(outcome)")
-        }
-        #expect(vm.recentProjectURLs.isEmpty)
-    }
-
     /// `recheckServerNow` must short-circuit (no fetchModels call, no
     /// long status text) when there's no selected server. Tests the
     /// guard at the top of the method — the actual cancellation
@@ -483,50 +415,6 @@ struct SpiceHarvesterTests {
 
         await vm.recheckServerNow()
         #expect(vm.statusText == "Není vybraný server")
-    }
-
-    /// Cross-window sync: when one view-model posts the recents-changed
-    /// notification, peer view-models must reload from UserDefaults so
-    /// their `Otevřít nedávné…` menu reflects the latest list without
-    /// an app restart.
-    @MainActor
-    @Test func recentProjectsObserverRefreshesPeerOnPost() async throws {
-        let recentKey = "SHRecentProjects"
-        let bookmarksKey = "SHProjectBookmarks"
-        let priorPaths = UserDefaults.standard.object(forKey: recentKey)
-        let priorBookmarks = UserDefaults.standard.object(forKey: bookmarksKey)
-        defer {
-            UserDefaults.standard.set(priorPaths, forKey: recentKey)
-            UserDefaults.standard.set(priorBookmarks, forKey: bookmarksKey)
-        }
-
-        UserDefaults.standard.removeObject(forKey: recentKey)
-        UserDefaults.standard.removeObject(forKey: bookmarksKey)
-
-        let observer = SHDocumentViewModel(persistenceMode: .scratch)
-        #expect(observer.recentProjectURLs.isEmpty)
-
-        // Simulate the side effect of another vm's
-        // `persistRecentProjectsAndBookmarks`: write to UserDefaults
-        // then broadcast. Pass `object: nil` so the observer doesn't
-        // treat the post as self-originated.
-        let peerPath = "/tmp/sh-peer-\(UUID().uuidString).spiceharvester.json"
-        UserDefaults.standard.set([peerPath], forKey: recentKey)
-        NotificationCenter.default.post(
-            name: SHDocumentViewModel.recentProjectsDidChange,
-            object: nil
-        )
-
-        // NotificationCenter dispatches observer blocks onto
-        // OperationQueue.main asynchronously. Poll up to ~500 ms so
-        // the test isn't flaky on busy machines while staying fast on
-        // the happy path (usually one iteration).
-        for _ in 0..<50 {
-            if !observer.recentProjectURLs.isEmpty { break }
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
-
-        #expect(observer.recentProjectURLs.map(\.path) == [peerPath])
     }
 
     private func repositoryRoot() -> URL {

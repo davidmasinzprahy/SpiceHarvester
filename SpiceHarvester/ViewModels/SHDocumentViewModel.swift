@@ -62,96 +62,7 @@ enum SHFolderKind: String, Codable, Hashable, CaseIterable, Sendable {
     case input, output, cache, prompt
 }
 
-/// Snapshot of everything that defines a "project" — folders, server
-/// selection, model picks, prompt, mode. Excluded:
-///   - server registry (URL+API key, kept globally so switching project
-///     doesn't blow away access to all my servers)
-///   - runtime state (isRunning, logs, lastCompletion)
-///   - performance prefs (concurrency, timeout — global tuning)
-/// JSON-encoded; written via NSSavePanel from `SHDocumentViewModel.saveProjectAs`.
-/// Pragmatic stand-in for full DocumentGroup (see `docs/P2_BACKLOG_DEFERRED.md`).
-struct SHProjectSnapshot: Codable, Sendable {
-    var inputFolder: String
-    var outputFolder: String
-    var cacheFolder: String
-    var promptFolder: String
-    var selectedInferenceModel: String
-    var selectedEmbeddingModel: String
-    var selectedRerankerModel: String
-    var selectedOCRModel: String
-    var extractionMode: SHExtractionMode
-    var currentPrompt: String
-    var lastLoadedPromptName: String
-    var schemaVersion: Int
-
-    init(
-        inputFolder: String,
-        outputFolder: String,
-        cacheFolder: String,
-        promptFolder: String,
-        selectedInferenceModel: String,
-        selectedEmbeddingModel: String,
-        selectedRerankerModel: String,
-        selectedOCRModel: String,
-        extractionMode: SHExtractionMode,
-        currentPrompt: String,
-        lastLoadedPromptName: String,
-        schemaVersion: Int = 1
-    ) {
-        self.inputFolder = inputFolder
-        self.outputFolder = outputFolder
-        self.cacheFolder = cacheFolder
-        self.promptFolder = promptFolder
-        self.selectedInferenceModel = selectedInferenceModel
-        self.selectedEmbeddingModel = selectedEmbeddingModel
-        self.selectedRerankerModel = selectedRerankerModel
-        self.selectedOCRModel = selectedOCRModel
-        self.extractionMode = extractionMode
-        self.currentPrompt = currentPrompt
-        self.lastLoadedPromptName = lastLoadedPromptName
-        self.schemaVersion = schemaVersion
-    }
-}
-
-/// Errors specific to the Save / Load Project feature. Surfaced to the
-/// view layer through `SHOpenProjectOutcome.failed(error:)` and
-/// rendered as user-readable text in the "Otevření projektu selhalo"
-/// alert. JSON decoding errors from `JSONDecoder` are intentionally
-/// passed through as-is — they're already descriptive enough.
-enum SHProjectError: LocalizedError {
-    case notAProject(url: URL)
-    /// Read failed with a sandbox permission error AND we have no
-    /// working security-scoped bookmark for the path. Tells the user
-    /// the specific remediation (re-pick the file via Cmd+O) instead
-    /// of the generic "neoprávněný přístup" alert.
-    case permissionDenied(url: URL)
-
-    var errorDescription: String? {
-        switch self {
-        case .notAProject(let url):
-            return "Soubor \(url.lastPathComponent) není projekt Spice Harvester. Otevři soubor exportovaný přes Uložit projekt jako…"
-        case .permissionDenied(let url):
-            return "Cesta \(url.lastPathComponent) vyžaduje opětovné udělení přístupu. macOS sandbox neuchovává oprávnění mezi spuštěními bez platného bookmarku. Otevři soubor znovu přes File → Otevřít projekt… (Cmd+O)."
-        }
-    }
-}
-
-/// Result of `SHDocumentViewModel.openProject`. The view layer matches on
-/// these to show appropriate UI:
-///   - `success`: silent; statusBar gets the message
-///   - `successNeedsRepick`: alert listing folders that need re-Vybrat
-///     because their security-scoped bookmark wasn't found in the
-///     existing registry
-///   - `failed`: alert with error text
-///   - `cancelled`: user dismissed NSOpenPanel; no UI feedback needed
-enum SHOpenProjectOutcome {
-    case success(url: URL)
-    case successNeedsRepick(url: URL, stalePaths: [String])
-    case failed(error: Error)
-    case cancelled
-}
-
-/// Outcome of `openSpiceResultFile`. Mirrors `SHOpenProjectOutcome` semantics.
+/// Outcome of `openSpiceResultFile`.
 enum SHOpenSpiceResultOutcome {
     case success(url: URL)
     case failed(error: Error)
@@ -255,23 +166,6 @@ final class SHDocumentViewModel {
     /// 0 (folder unreadable) even though the path is correct.
     private var recentFolderBookmarks: [String: Data] = [:]
     private static let recentFolderBookmarksKey = "SHRecentFolderBookmarks"
-
-    /// Recently-touched `.spiceharvester.json` project files (both saved
-    /// via Cmd+Shift+S and opened via Cmd+O). Drives the
-    /// `File → Otevřít nedávné…` submenu so users don't have to
-    /// re-navigate the open panel for their 5–8 most active projects.
-    /// Most recent first, deduped, capped at `recentProjectsLimit`.
-    var recentProjectURLs: [URL] = []
-    static let recentProjectsLimit: Int = 8
-
-    /// Security-scoped bookmarks for project file URLs, keyed by absolute
-    /// path. Kept **separately** from `SHAppConfig.folderBookmarks`
-    /// because that struct is intentionally wiped at launch (see README
-    /// "Persistence" — provozní vstupy se resetují). Project bookmarks
-    /// need to survive restart so `Otevřít nedávné` actually works — a
-    /// path string alone gives us nothing in a sandboxed app after the
-    /// session that issued the NSOpenPanel grant has ended.
-    private var projectBookmarks: [String: Data] = [:]
 
     /// Result-summary fields produced by the most recent extraction run.
     /// Populated at the tail of `performExtraction` and broadcast via
@@ -404,13 +298,6 @@ final class SHDocumentViewModel {
     var canRunAll: Bool { canRunExtraction && canRunPreprocessing }
 
     var canOpenOutput: Bool { hasOutputFolder }
-
-    /// True when the project has at least one meaningful field set, so
-    /// "Uložit projekt jako…" produces a non-empty snapshot. Empty
-    /// project save = JSON with only empty strings, useless and confusing.
-    var canSaveProject: Bool {
-        hasInputFolder || hasOutputFolder || hasPrompt
-    }
 
     var toolbarReadyText: String {
         if isRunning { return "Zpracovávám…" }
@@ -930,13 +817,6 @@ final class SHDocumentViewModel {
             }
         }
 
-        // Restore recent project file URLs + their security-scoped
-        // bookmarks from UserDefaults. Centralised in
-        // `reloadRecentProjectsFromDefaults` so the cross-window
-        // observer below can re-trigger the same load when a peer
-        // window posts `recentProjectsDidChange`.
-        reloadRecentProjectsFromDefaults()
-
         // Flush any pending debounced persist when the app is about to terminate.
         // Prevents data loss when the user is mid-edit (300 ms window) and
         // force-quits / crashes / hits the power button.
@@ -980,34 +860,6 @@ final class SHDocumentViewModel {
                 Task { @MainActor in
                     self?.openOutput()
                 }
-            }
-        }
-
-        // Cross-window recents sync. When another view-model (a peer
-        // scratch window, or the primary in the inverse direction)
-        // writes to the shared `SHRecentProjects` / `SHProjectBookmarks`
-        // UserDefaults keys, it posts `recentProjectsDidChange` so we
-        // can refresh our in-memory copy and the `File → Otevřít
-        // nedávné…` menu reflects the new list without an app restart.
-        // We skip notifications we posted ourselves (identity check on
-        // `object`) — UserDefaults already holds the value we just
-        // mutated, so re-reading is wasted work.
-        //
-        // `MainActor.assumeIsolated` (not `Task { @MainActor in }`)
-        // because `queue: .main` already pins the block to the main
-        // thread / main actor. Avoiding the Task hop keeps the refresh
-        // synchronous with the post — important for tests and for
-        // tight save→display cycles where a queued Task could lag
-        // behind a UI redraw.
-        NotificationCenter.default.addObserver(
-            forName: Self.recentProjectsDidChange,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if let sender = notification.object as AnyObject?, sender === self { return }
-                self.reloadRecentProjectsFromDefaults()
             }
         }
 
@@ -1601,179 +1453,6 @@ final class SHDocumentViewModel {
     }
 
     private static let promptHistoryKey = "SHPromptHistory"
-    private static let recentProjectsKey = "SHRecentProjects"
-    private static let projectBookmarksKey = "SHProjectBookmarks"
-
-    /// Posted by any view-model after a successful write to the shared
-    /// recent-projects / project-bookmarks UserDefaults keys. Observed
-    /// by every other view-model so a save in a scratch window shows up
-    /// in the primary's `Otevřít nedávné…` menu (and vice versa)
-    /// without an app restart. The notification's `object` is the
-    /// posting view-model so receivers can skip their own posts.
-    static let recentProjectsDidChange = Notification.Name(
-        "DavidMasin.SpiceHarvester.recentProjectsDidChange"
-    )
-
-    // MARK: – Recent projects
-
-    /// Pushes a project URL onto `recentProjectURLs` (most recent first,
-    /// deduplicated by path, capped) and stores a security-scoped
-    /// bookmark so the URL stays openable after app restart. Without
-    /// the bookmark, sandboxed `Data(contentsOf: url)` calls fail with
-    /// permission error once the original NSOpenPanel session ends.
-    ///
-    /// Project-file metadata is **inherently global** (the disk artifact
-    /// exists for the whole user), so unlike prompt history / folder
-    /// recents this write happens from scratch view-models too. Before
-    /// mutating we resync from UserDefaults so a peer window's recent
-    /// addition doesn't get clobbered by our stale in-memory snapshot.
-    private func rememberProjectURL(_ url: URL) {
-        // Pull latest from UserDefaults so we don't overwrite changes
-        // made by another window since our last reload. Without this,
-        // primary saves A, scratch saves B → scratch persists [B]
-        // (loses A) because scratch's in-memory list was [].
-        reloadRecentProjectsFromDefaults()
-
-        let path = url.path
-        recentProjectURLs.removeAll { $0.path == path }
-        recentProjectURLs.insert(url, at: 0)
-        if recentProjectURLs.count > Self.recentProjectsLimit {
-            // Drop oldest entries from the URL list, plus their bookmarks
-            // — keeps the bookmarks map from growing without bound for
-            // users who churn through many projects.
-            let evicted = recentProjectURLs.suffix(recentProjectURLs.count - Self.recentProjectsLimit)
-            for url in evicted {
-                projectBookmarks.removeValue(forKey: url.path)
-            }
-            recentProjectURLs.removeLast(recentProjectURLs.count - Self.recentProjectsLimit)
-        }
-
-        // Best-effort bookmark capture. Failure (e.g. user picked a path
-        // outside the sandbox grant chain) is silently logged via the
-        // missing key — Open Recent click later falls back to raw URL
-        // and lets the user see the permission error.
-        if let data = try? url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        ) {
-            projectBookmarks[path] = data
-        }
-
-        persistRecentProjectsAndBookmarks()
-    }
-
-    /// Drops a project URL (and its bookmark) from the recent list.
-    /// Called when openProject hits a hard failure (file missing /
-    /// unreadable / not a project file) — keeping a dead path in the
-    /// menu just produces repeat error alerts.
-    private func forgetProjectURL(_ url: URL) {
-        reloadRecentProjectsFromDefaults()
-        recentProjectURLs.removeAll { $0.path == url.path }
-        projectBookmarks.removeValue(forKey: url.path)
-        persistRecentProjectsAndBookmarks()
-    }
-
-    /// User-invoked clear from `File → Otevřít nedávné → Vyčistit`.
-    /// Drops both the URL list and all stored bookmarks.
-    func clearRecentProjects() {
-        recentProjectURLs.removeAll()
-        projectBookmarks.removeAll()
-        let recentKey = Self.recentProjectsKey
-        let bookmarksKey = Self.projectBookmarksKey
-        let postName = Self.recentProjectsDidChange
-        let weakSelf = self
-        Task.detached(priority: .utility) {
-            UserDefaults.standard.removeObject(forKey: recentKey)
-            UserDefaults.standard.removeObject(forKey: bookmarksKey)
-            // Hop to main for the post so observers (registered with
-            // `.main` queue) receive on the expected queue and so the
-            // `object` identity used for self-skip is stable.
-            await MainActor.run {
-                NotificationCenter.default.post(name: postName, object: weakSelf)
-            }
-        }
-    }
-
-    /// Re-reads `recentProjectURLs` + `projectBookmarks` from the shared
-    /// UserDefaults keys. Idempotent. Called from init (initial load)
-    /// AND from the cross-window observer when a peer view-model posts
-    /// `recentProjectsDidChange`. Also called before any mutation so we
-    /// merge over the latest persisted state instead of overwriting it.
-    private func reloadRecentProjectsFromDefaults() {
-        if let savedPaths = UserDefaults.standard.array(forKey: Self.recentProjectsKey) as? [String] {
-            self.recentProjectURLs = savedPaths
-                .prefix(Self.recentProjectsLimit)
-                .map { URL(fileURLWithPath: $0) }
-        } else {
-            self.recentProjectURLs = []
-        }
-        if let savedBookmarks = UserDefaults.standard.dictionary(forKey: Self.projectBookmarksKey) as? [String: Data] {
-            self.projectBookmarks = savedBookmarks
-        } else {
-            self.projectBookmarks = [:]
-        }
-    }
-
-    /// Resolves a recent-project URL via its stored security-scoped
-    /// bookmark and returns the fresh URL the caller can then bracket
-    /// with `start/stopAccessingSecurityScopedResource`. Falls back to
-    /// the input URL when no bookmark is stored — the caller's read
-    /// will likely fail with permission error, which `openProject`
-    /// handles by removing the URL from the recents list.
-    ///
-    /// Returns `(url, scopeStarted)` so the caller can correctly
-    /// release the scope only if we actually started it.
-    private func acquireProjectScope(for url: URL) -> (url: URL, scopeStarted: Bool) {
-        guard let data = projectBookmarks[url.path] else {
-            return (url, false)
-        }
-        var isStale = false
-        guard let resolved = try? URL(
-            resolvingBookmarkData: data,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else {
-            // Bookmark unusable — drop it and fall back to plain URL.
-            projectBookmarks.removeValue(forKey: url.path)
-            return (url, false)
-        }
-        if isStale {
-            // Refresh the bookmark in-place so next launch has fresh data.
-            if let fresh = try? resolved.bookmarkData(
-                options: .withSecurityScope,
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            ) {
-                projectBookmarks[url.path] = fresh
-                persistRecentProjectsAndBookmarks()
-            }
-        }
-        let started = resolved.startAccessingSecurityScopedResource()
-        return (resolved, started)
-    }
-
-    /// Bundles the dual-write of `recentProjectURLs` + `projectBookmarks`
-    /// into a single off-main task. Centralised so every callsite
-    /// (remember / forget / stale refresh) persists both in lockstep.
-    /// After the write completes, broadcasts `recentProjectsDidChange`
-    /// so peer view-models (other windows) refresh their menus.
-    private func persistRecentProjectsAndBookmarks() {
-        let paths = recentProjectURLs.map { $0.path }
-        let bookmarks = projectBookmarks
-        let postName = Self.recentProjectsDidChange
-        let recentKey = Self.recentProjectsKey
-        let bookmarksKey = Self.projectBookmarksKey
-        let sender = self
-        Task.detached(priority: .utility) {
-            UserDefaults.standard.set(paths, forKey: recentKey)
-            UserDefaults.standard.set(bookmarks, forKey: bookmarksKey)
-            await MainActor.run {
-                NotificationCenter.default.post(name: postName, object: sender)
-            }
-        }
-    }
 
     // MARK: – Server health (manual recheck)
 
@@ -1812,71 +1491,6 @@ final class SHDocumentViewModel {
         await task.value
     }
 
-    // MARK: – Save / Load Project (pragmatic DocumentGroup substitute)
-
-    /// Encode current project state to a `.spiceharvester` JSON file
-    /// chosen via NSSavePanel. Returns the chosen URL on success so the
-    /// caller can show a confirmation; nil when the user cancelled.
-    @discardableResult
-    func saveProjectAs() -> URL? {
-        let snapshot = SHProjectSnapshot(
-            inputFolder: config.inputFolder,
-            outputFolder: config.outputFolder,
-            cacheFolder: config.cacheFolder,
-            promptFolder: config.promptFolder,
-            selectedInferenceModel: config.selectedInferenceModel,
-            selectedEmbeddingModel: config.selectedEmbeddingModel,
-            selectedRerankerModel: config.selectedRerankerModel,
-            selectedOCRModel: config.selectedOCRModel,
-            extractionMode: config.extractionMode,
-            currentPrompt: config.currentPrompt,
-            lastLoadedPromptName: config.lastLoadedPromptName
-        )
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "Spice Harvester Project.spiceharvester.json"
-        panel.title = "Uložit projekt jako…"
-        panel.message = "Server registry, výkonové předvolby a runtime stav se neukládají — jen složky, vybrané modely, prompt a režim."
-        guard panel.runModal() == .OK, let url = panel.url else { return nil }
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(snapshot)
-            try data.write(to: url, options: .atomic)
-            rememberProjectURL(url)
-            statusText = "Projekt uložen: \(url.lastPathComponent)"
-            return url
-        } catch {
-            statusText = "Uložení projektu selhalo: \(error.localizedDescription)"
-            return nil
-        }
-    }
-
-    /// Restore project from a `.spiceharvester` JSON file. Server
-    /// registry is intentionally NOT included in the snapshot — switching
-    /// project shouldn't strip away the user's saved servers — but
-    /// `selectedInferenceModel` and other model picks are restored, so
-    /// they only "stick" if the same models are loaded on the current
-    /// server.
-    ///
-    /// Sandboxing caveat: NSOpenPanel grants access to the chosen JSON
-    /// file only, not to the folder paths described inside it. We use
-    /// existing `folderBookmarks` for paths the user previously picked
-    /// in this app; paths without a stored bookmark are loaded as
-    /// strings only and the function returns the list of "stale" paths
-    /// so the caller can warn the user to re-pick them.
-    func openProject() -> SHOpenProjectOutcome {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
-        panel.title = "Otevřít projekt…"
-        panel.message = "Vyber .spiceharvester.json soubor exportovaný přes Uložit projekt jako…"
-        guard panel.runModal() == .OK, let url = panel.url else { return .cancelled }
-        return openProject(at: url)
-    }
-
     /// Opens an open panel filtered to `.spice-result.json` files.
     /// Returns the decoded outcome.
     func openSpiceResultFile() -> SHOpenSpiceResultOutcome {
@@ -1889,139 +1503,6 @@ final class SHDocumentViewModel {
         panel.message = "Vyber .spice-result.json soubor exportovaný přes Export → JSON"
         guard panel.runModal() == .OK, let url = panel.url else { return .cancelled }
         return openSpiceResultFile(url)
-    }
-
-    /// Direct-path variant of `openProject` used by `File → Otevřít
-    /// nedávné…` menu items. Skips the open panel and decodes from the
-    /// known URL. If decoding fails (file missing, format invalid), the
-    /// URL is removed from `recentProjectURLs` so the menu doesn't keep
-    /// listing a dead entry.
-    ///
-    /// Acquires the security-scoped bookmark stored at remember time so
-    /// the read succeeds even across app restarts. The freshly-picked
-    /// case (saveProjectAs / openProject just ran in this session) also
-    /// works because the bookmark was just written.
-    func openProject(at url: URL) -> SHOpenProjectOutcome {
-        let scoped = acquireProjectScope(for: url)
-        defer {
-            if scoped.scopeStarted {
-                scoped.url.stopAccessingSecurityScopedResource()
-            }
-        }
-        do {
-            let data = try Data(contentsOf: scoped.url)
-            // Wrap the decode in a project-shaped sniff so a friendly
-            // error replaces the noisy `keyNotFound(...)` cascade when
-            // the user picks a random JSON. Validates one canonical
-            // marker (`schemaVersion`) before going for the full decode.
-            guard let probe = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  probe["schemaVersion"] != nil else {
-                // Same self-healing as the catch block below — dead
-                // entries shouldn't keep haunting the Recent menu.
-                forgetProjectURL(url)
-                statusText = "Tento JSON není projekt Spice Harvester"
-                return .failed(error: SHProjectError.notAProject(url: url))
-            }
-            let snapshot = try JSONDecoder().decode(SHProjectSnapshot.self, from: data)
-
-            // Reset runtime state so the user doesn't see the previous
-            // project's "Hotovo" banner / progress card after the
-            // snapshot loads. Cached docs from the previous input are
-            // dropped because the new snapshot may point at a different
-            // folder (and even if same path, freshly invalidated is
-            // safer than stale).
-            lastCompletion = nil
-            progressState = SHProgressViewState()
-            cachedDocuments.removeAll()
-            cachedDocumentsInputPath = ""
-            // Project switch implies the user wants a fresh banner read;
-            // a "Skrýt" dismissal that made sense for project A doesn't
-            // necessarily apply to project B.
-            dismissedConflictIDs.removeAll()
-
-            // Apply the snapshot.
-            config.inputFolder = snapshot.inputFolder
-            config.outputFolder = snapshot.outputFolder
-            config.cacheFolder = snapshot.cacheFolder
-            config.promptFolder = snapshot.promptFolder
-            config.selectedInferenceModel = snapshot.selectedInferenceModel
-            config.selectedEmbeddingModel = snapshot.selectedEmbeddingModel
-            config.selectedRerankerModel = snapshot.selectedRerankerModel
-            config.selectedOCRModel = snapshot.selectedOCRModel
-            config.extractionMode = snapshot.extractionMode
-            config.currentPrompt = snapshot.currentPrompt
-            config.lastLoadedPromptName = snapshot.lastLoadedPromptName
-
-            // Detect paths that won't survive sandboxing — without an
-            // existing bookmark in `config.folderBookmarks` we can't
-            // open the folder. The view shows an alert so the user
-            // knows to re-pick them via Vybrat.
-            let stalePaths = staleSandboxPaths(in: snapshot)
-
-            refreshInputFolderStats()
-            scheduleConflictUpdate(after: 0)
-            persistAll()
-            rememberProjectURL(url)
-            statusText = stalePaths.isEmpty
-                ? "Projekt načten: \(url.lastPathComponent)"
-                : "Projekt načten · \(stalePaths.count) složek vyžaduje re-pick"
-            return stalePaths.isEmpty
-                ? .success(url: url)
-                : .successNeedsRepick(url: url, stalePaths: stalePaths)
-        } catch {
-            // Open Recent click hit a dead path — drop it so the user
-            // doesn't see the same error every time they open the menu.
-            forgetProjectURL(url)
-            // Distinguish "sandbox refused the read because we have no
-            // valid bookmark" from genuine I/O errors. The former
-            // happens primarily across app restarts when the original
-            // NSOpenPanel grant has expired and the stored bookmark
-            // either didn't exist or failed to resolve — the
-            // remediation is "re-pick via Cmd+O", not the generic
-            // Cocoa error text.
-            //
-            // ONLY `NSFileReadNoPermissionError` qualifies. `NSFileNoSuchFileError`
-            // means the file is genuinely missing (user deleted the
-            // project file outside the app) — the remediation is
-            // different, and a "vyžaduje re-grant" message would
-            // mislead the user into clicking Cmd+O looking for a file
-            // that no longer exists.
-            let nsError = error as NSError
-            let isPermissionError = nsError.domain == NSCocoaErrorDomain
-                && nsError.code == NSFileReadNoPermissionError
-            if isPermissionError && !scoped.scopeStarted {
-                let mapped = SHProjectError.permissionDenied(url: url)
-                statusText = "Cesta vyžaduje re-grant — otevři projekt znovu (Cmd+O)"
-                return .failed(error: mapped)
-            }
-            statusText = "Otevření projektu selhalo: \(error.localizedDescription)"
-            return .failed(error: error)
-        }
-    }
-
-    /// Returns paths from the snapshot that lack a stored security-scoped
-    /// bookmark and can't be silently restored. The caller surfaces these
-    /// to the user as an "re-pick required" warning. Empty paths (user
-    /// hadn't set them in the saved project) are skipped.
-    private func staleSandboxPaths(in snapshot: SHProjectSnapshot) -> [String] {
-        var stale: [String] = []
-        let candidates = [
-            snapshot.inputFolder,
-            snapshot.outputFolder,
-            snapshot.cacheFolder,
-            snapshot.promptFolder
-        ]
-        for path in candidates {
-            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            // A path is recoverable if either store holds a bookmark — mirror
-            // the same fallback `resolveScopedURL` uses, so a folder covered by
-            // the durable recents store isn't falsely flagged "re-pick required".
-            if config.folderBookmarks[trimmed] == nil && recentFolderBookmarks[trimmed] == nil {
-                stale.append(trimmed)
-            }
-        }
-        return stale
     }
 
     // MARK: – Recent folders
@@ -3151,7 +2632,11 @@ final class SHDocumentViewModel {
             // If we have a bookmark, try to resolve it instead.
             // This shouldn't happen for normal file-open but handle gracefully.
             statusText = "Nelze získat přístup k souboru \(url.lastPathComponent)"
-            return .failed(error: SHProjectError.permissionDenied(url: url))
+            return .failed(error: NSError(
+                domain: "DavidMasin.SpiceHarvester",
+                code: NSFileReadNoPermissionError,
+                userInfo: [NSLocalizedDescriptionKey: "Cesta \(url.lastPathComponent) vyžaduje opětovné udělení přístupu — otevři soubor znovu."]
+            ))
         }
         scopedStarted = true
 
