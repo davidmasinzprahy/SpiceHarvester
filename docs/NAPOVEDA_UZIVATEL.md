@@ -32,7 +32,7 @@ Aplikace je **document-based** — každé okno je jeden projekt (`*.spiceharves
 
 Když si macOS sloučí okna do tabů (Window → Sloučit všechna okna), každý tab/okno ukazuje svůj kontext, takže nevidíš čtyři stejné „SpiceHarvester":
 
-- **Titulek**: `Spice Harvester — <jméno vstupní složky>` (např. `Spice Harvester — EmbolieTesty`); ze scratch okna doplněno `· scratch`
+- **Titulek**: `Spice Harvester — <jméno vstupní složky>` (např. `Spice Harvester — EmbolieTesty`)
 - **Podtitulek**: `<server> · <režim> · <progres>` (např. `Local LM Studio · FAST · 5 / 16`). Při klidovém stavu jen server. Po dokončení `Hotovo · N dokumentů`
 
 Pokud chceš různé tabs spouštět **paralelně proti různým LM Studio instancím**, přidej víc serverů (různé Base URL) v sekci Server a v každé záložce vyber jiný. Server v titulku ti potvrdí kombinaci.
@@ -109,7 +109,7 @@ Aplikace je document-based — **File** menu má nativní New / Open / Open Rece
 - **Režim FAST / SEARCH / CONSOLIDATE** — Cmd+1 / Cmd+2 / Cmd+3
 - **Znovu ověřit zdraví serveru** — manuální ping mimo 30 s health watcher
 
-Po každém **Uložit projekt jako…** nebo **Otevřít projekt…** se cesta zaznamenává do persistentního seznamu (max 8). V submenu se zobrazují jako `název · cesta` (s tildeify, např. `medical · ~/Documents/projects`). Kliknutí přímo načte projekt — bez panel dialogu. Když cesta selže (soubor smazán), automaticky se ze seznamu odebere.
+**File → Open Recent** je nativní (macOS DocumentGroup) — drží nedávno otevřené `.spiceharvester.json` projekty, kliknutí je otevře přímo.
 
 ## Shortcuts.app + Siri (spouštění jako job)
 

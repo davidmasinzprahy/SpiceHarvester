@@ -50,31 +50,6 @@ struct SpiceHarvesterApp: App {
     /// (např. Settings/Help). Commands se pak vypnou.
     private var targetVM: SHDocumentViewModel? { focusedVM }
 
-    /// Compact label for a recent-project URL shown in the
-    /// `File → Otevřít nedávné…` submenu. Strips the redundant
-    /// `.spiceharvester.json` suffix and tildeifies the parent path so
-    /// `~/Documents/medical/foo.spiceharvester.json` reads as
-    /// `foo · ~/Documents/medical`. Long composites are truncated with
-    /// `…/lastFolder` so macOS doesn't render a 600 pt-wide menu when
-    /// the project lives in a deeply-nested external drive path.
-    private func recentProjectMenuTitle(_ url: URL) -> String {
-        var name = url.lastPathComponent
-        if name.hasSuffix(".spiceharvester.json") {
-            name = String(name.dropLast(".spiceharvester.json".count))
-        } else if name.hasSuffix(".json") {
-            name = String(name.dropLast(".json".count))
-        }
-        let parent = (url.deletingLastPathComponent().path as NSString)
-            .abbreviatingWithTildeInPath
-        let combined = "\(name) · \(parent)"
-        guard combined.count > 64 else { return combined }
-        // Keep the project name in full, truncate the parent. macOS menu
-        // ellipsis convention: `…/lastSegment` preserves the most
-        // recognizable component (the project's containing folder).
-        let parentURL = URL(fileURLWithPath: parent)
-        let lastSegment = parentURL.lastPathComponent
-        return "\(name) · …/\(lastSegment)"
-    }
 
     var body: some Scene {
         DocumentGroup(newDocument: { SHProjectDocument() }) { configuration in
