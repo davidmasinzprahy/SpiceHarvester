@@ -202,6 +202,14 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
     /// `application(_:openURLs:)` can access it.
     weak var primaryViewModel: SHDocumentViewModel?
 
+    /// Document-based app při startu bez dokumentu jinak ukáže Open panel
+    /// (výběr souboru). Vrácením `true` se místo toho otevře nové prázdné
+    /// projektové okno — uživatel přistane rovnou v aplikaci (jako u dřívějšího
+    /// single-window chování). Platí i pro klik na ikonu v Docku bez oken.
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        true
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Become the notification delegate so we can respond to action
         // buttons ("Otevřít výstup") on completion notifications. Without
