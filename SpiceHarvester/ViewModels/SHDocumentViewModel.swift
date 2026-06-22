@@ -73,13 +73,8 @@ enum SHOpenSpiceResultOutcome {
 @Observable
 final class SHDocumentViewModel {
     var config: SHAppConfig
-    /// Navázaný projektový dokument (DocumentGroup). `nil` pro headless cesty
-    /// (AppIntents). Obsah projektu (folders/modely/prompt/mode/promptHistory)
-    /// je single source of truth v `document.content`; `config` je pracovní kopie
-    /// a `persistAll` ho zapisuje zpět, takže DocumentGroup autosave/verze fungují.
-    var document: SHProjectDocument?
     /// Sdílený app-level stav (server registr, prefs, služby). Injektuje se
-    /// z `SpiceHarvesterApp`.
+    /// z `SpiceHarvesterApp` (app-first WindowGroup).
     let global: SHGlobalState
     /// Pass-through na `global.servers` — zachovává stávající call sites (`vm.servers`).
     var servers: [SHServerConfig] {
@@ -879,15 +874,8 @@ final class SHDocumentViewModel {
         Self.liveRegistry.add(self)
     }
 
-    /// Document-based init (DocumentGroup). Využije designated init (observers,
-    /// recents, …) a překryje pracovní `config` obsahem z dokumentu.
-    convenience init(document: SHProjectDocument, global: SHGlobalState) {
-        self.init(persistenceMode: .persistent, global: global)
-        self.document = document
-        applyProjectContent(document.content)
-    }
-
     /// Překlopí obsah projektu do pracovního `config` + `promptHistory`.
+    /// Sdílené přes Uložit/Otevřít projekt.
     private func applyProjectContent(_ c: SHProjectContent) {
         config.inputFolder = c.inputFolder
         config.outputFolder = c.outputFolder
@@ -934,6 +922,71 @@ final class SHDocumentViewModel {
         c.lastLoadedPromptName = config.lastLoadedPromptName
         c.promptHistory = promptHistory
         return c
+    }
+
+    // MARK: – Uložení / otevření projektu (uživatel volí cestu)
+
+    /// Uloží obsah projektu (složky, modely, prompt, režim, historie promptů) do
+    /// JSON souboru, jehož cestu vybere uživatel přes NSSavePanel. Servery a
+    /// předvolby jsou globální → do projektu nepatří. Vrací URL při úspěchu.
+    @discardableResult
+    func saveProjectAs() -> URL? {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "Projekt.spiceharvester.json"
+        panel.title = "Uložit projekt jako…"
+        panel.message = "Uloží složky, vybrané modely, prompt a režim. Servery a předvolby jsou společné pro celou aplikaci, do projektu se neukládají."
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        do {
+            let data = try SHJSON.encoder().encode(currentProjectContent())
+            try data.write(to: url, options: .atomic)
+            statusText = "Projekt uložen: \(url.lastPathComponent)"
+            return url
+        } catch {
+            statusText = "Uložení projektu selhalo: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Otevře projekt vybraný uživatelem přes NSOpenPanel.
+    func openProject() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.title = "Otevřít projekt…"
+        panel.message = "Vyber .spiceharvester.json soubor uložený přes Uložit projekt jako…"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        openProject(at: url)
+    }
+
+    /// Načte projekt z konkrétní cesty (NSOpenPanel i Finder dvojklik přes
+    /// `SHAppDelegate.application(_:open:)`).
+    func openProject(at url: URL) {
+        let started = url.startAccessingSecurityScopedResource()
+        defer { if started { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url)
+            guard let probe = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  probe["inputFolder"] != nil || probe["extractionMode"] != nil else {
+                statusText = "Tento JSON není projekt Spice Harvester"
+                return
+            }
+            let content = try SHJSON.decoder().decode(SHProjectContent.self, from: data)
+            // Reset běhového stavu, ať nezůstane banner/cache z předchozího projektu.
+            lastCompletion = nil
+            progressState = SHProgressViewState()
+            cachedDocuments.removeAll()
+            cachedDocumentsInputPath = ""
+            applyProjectContent(content)
+            refreshInputFolderStats()
+            scheduleConflictUpdate(after: 0)
+            persistAll()
+            statusText = "Projekt načten: \(url.lastPathComponent)"
+        } catch {
+            statusText = "Otevření projektu selhalo: \(error.localizedDescription)"
+        }
     }
 
     var selectedServerIndex: Int {
@@ -1088,8 +1141,6 @@ final class SHDocumentViewModel {
         serverStore.saveServers(servers)
         // App prefs jsou globální (sdílené) — ukládají se vždy.
         global.savePreferences()
-        // Obsah projektu zpět do dokumentu → DocumentGroup autosave / verze.
-        document?.content = currentProjectContent()
     }
 
     /// Debounced variant for keystroke-driven bindings (prompt text, server URL).
@@ -1106,7 +1157,6 @@ final class SHDocumentViewModel {
             self?.configStore.save(self?.config ?? SHAppConfig())
             self?.serverStore.saveServers(self?.servers ?? [])
             self?.global.savePreferences()
-            if let self, let doc = self.document { doc.content = self.currentProjectContent() }
         }
     }
 

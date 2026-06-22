@@ -28,9 +28,9 @@ extension FocusedValues {
 @main
 struct SpiceHarvesterApp: App {
     @NSApplicationDelegateAdaptor(SHAppDelegate.self) var appDelegate
-    /// App-level sdílený stav (server registr, prefs, recents, služby). Jedna
-    /// instance pro celou appku, injektovaná do každého document okna i do Settings.
-    @State private var global = SHGlobalState()
+    /// Jediný app-level view-model (app-first WindowGroup). Drží sdílený
+    /// `SHGlobalState` (servery / prefs / služby), který sdílí i Settings.
+    @State private var vm = SHDocumentViewModel()
     /// Resolves to the focused window's view-model (primary or scratch).
     /// Menu commands route through this so project ops act on the
     /// expected window. Falls back to the App-level `vm` (primary) when
@@ -45,16 +45,19 @@ struct SpiceHarvesterApp: App {
     /// View-model that menu commands should operate on — focused window
     /// when one is up, primary as fallback. Centralised so every menu
     /// item uses the same routing without scattering ternaries.
-    /// V document-based appce není „primary" okno — menu commands cílí na
-    /// zaměřený dokument. `nil`, když není v popředí žádné document okno
-    /// (např. Settings/Help). Commands se pak vypnou.
-    private var targetVM: SHDocumentViewModel? { focusedVM }
+    /// Menu commands cílí na zaměřené okno; fallback na app-level `vm`.
+    /// Typováno optional kvůli stávajícím `targetVM?` call sites, ale s `vm`
+    /// fallbackem je prakticky vždy nenulové.
+    private var targetVM: SHDocumentViewModel? { focusedVM ?? vm }
 
 
     var body: some Scene {
-        DocumentGroup(newDocument: { SHProjectDocument() }) { configuration in
-            ContentView(document: configuration.document, global: global)
+        WindowGroup {
+            ContentView(vm: vm)
+                .focusedSceneValue(\.focusedViewModel, vm)
+                .onAppear { appDelegate.primaryViewModel = vm }
         }
+        .defaultSize(width: 1180, height: 980)
         .commands {
             // ┌──────────────────────────────────────────────────────────┐
             // │ File menu — purely document / project operations.        │
@@ -63,9 +66,23 @@ struct SpiceHarvesterApp: App {
             // │ process-driven apps).                                    │
             // └──────────────────────────────────────────────────────────┘
 
-            // New / Open / Open Recent / Save / Save As / Duplicate / Rename
-            // dodává nativně DocumentGroup. Zůstávají jen app-specifické akce.
+            // App-first: projekt se otevírá/ukládá explicitně, uživatel volí cestu.
+            CommandGroup(replacing: .newItem) {
+                Button("Otevřít projekt…") {
+                    targetVM?.openProject()
+                }
+                .keyboardShortcut("o", modifiers: .command)
+                .disabled(targetVM?.isRunning == true)
+            }
             CommandGroup(after: .saveItem) {
+                Button("Uložit projekt jako…") {
+                    _ = targetVM?.saveProjectAs()
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(targetVM?.isRunning == true)
+
+                Divider()
+
                 Button("Otevřít výsledek...") {
                     _ = targetVM?.openSpiceResultFile()
                 }
@@ -163,7 +180,7 @@ struct SpiceHarvesterApp: App {
         // Settings je app-level (Cmd+,) — binduje na sdílený `global` (prefs).
         // Per-projekt akce (Vyčistit cache) jsou v Pipeline menu, ne tady.
         Settings {
-            SettingsView(global: global)
+            SettingsView(global: vm.global)
         }
 
         // Help window — `Window` (not `WindowGroup`) because Help is
@@ -201,40 +218,6 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
     /// `applicationDidFinishLaunching` so delegate methods like
     /// `application(_:openURLs:)` can access it.
     weak var primaryViewModel: SHDocumentViewModel?
-
-    /// Document-based app by při startu bez dokumentu ukázala Open panel.
-    /// `true` → místo panelu otevřeme dokument (viz `applicationOpenUntitledFile`).
-    /// Platí i pro klik na ikonu v Docku bez oken.
-    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        true
-    }
-
-    /// Místo prázdného „Untitled" okna otevře **pojmenovaný** výchozí projekt
-    /// (`Spice Harvester.spiceharvester.json` v Application Support kontejneru
-    /// appky — vždy zapisovatelný i v sandboxu). Okno tak má smysluplný titulek,
-    /// ne „Untitled", a nezobrazí se Open panel. Soubor se při prvním startu
-    /// vytvoří z prázdného obsahu.
-    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        let url = Self.defaultProjectURL
-        if !FileManager.default.fileExists(atPath: url.path) {
-            try? FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let empty = (try? SHJSON.encoder().encode(SHProjectContent())) ?? Data()
-            try? empty.write(to: url, options: .atomic)
-        }
-        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, _ in }
-        return true
-    }
-
-    /// Pojmenovaný výchozí projekt v Application Support kontejneru appky.
-    /// Název souboru = titulek okna („Spice Harvester").
-    static var defaultProjectURL: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return base
-            .appendingPathComponent("SpiceHarvester", isDirectory: true)
-            .appendingPathComponent("Spice Harvester.spiceharvester.json")
-    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Become the notification delegate so we can respond to action
@@ -400,9 +383,18 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
         switch kind {
         case .result:
             _ = vm.openSpiceResultFile(url)
-        case .project, .unsupported:
-            // Projekty (`*.spiceharvester.json`) otevírá nativně DocumentGroup;
-            // tady je neřešíme, ať nedojde k dvojímu otevření.
+        case .project:
+            // Dvojklik / drag `.spiceharvester.json` ve Finderu → načti projekt
+            // do hlavního okna.
+            guard !vm.isRunning else {
+                let alert = NSAlert()
+                alert.messageText = "Úloha běží"
+                alert.informativeText = "Projekt nelze otevřít během zpracování. Počkej na dokončení nebo běh přeruš."
+                alert.runModal()
+                return
+            }
+            vm.openProject(at: url)
+        case .unsupported:
             return
         }
     }

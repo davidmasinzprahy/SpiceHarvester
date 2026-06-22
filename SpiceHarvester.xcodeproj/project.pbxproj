@@ -55,6 +55,16 @@
 		DDCCDDCC2E0870CA00F34702 /* SpiceHarvesterQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SpiceHarvesterQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		DDCCDDCC2E0870CA00F34714 /* Exceptions for "SpiceHarvesterQuickLook" folder in "SpiceHarvesterQuickLook" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = DDCCDDCC2E0870CA00F34703 /* SpiceHarvesterQuickLook */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		63A1C0D82E0870C900F34733 /* SpiceHarvester */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -74,23 +84,12 @@
 		DDCCDDCC2E0870CA00F34701 /* SpiceHarvesterQuickLook */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				DDCCDDCC2E0870CA00F34714 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+				DDCCDDCC2E0870CA00F34714 /* Exceptions for "SpiceHarvesterQuickLook" folder in "SpiceHarvesterQuickLook" target */,
 			);
 			path = SpiceHarvesterQuickLook;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		DDCCDDCC2E0870CA00F34714 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-				SpiceHarvesterQuickLook.entitlements,
-			);
-			target = DDCCDDCC2E0870CA00F34703 /* SpiceHarvesterQuickLook */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		63A1C0D32E0870C900F34733 /* Frameworks */ = {
@@ -173,28 +172,6 @@
 			productReference = 63A1C0D62E0870C900F34733 /* SpiceHarvester.app */;
 			productType = "com.apple.product-type.application";
 		};
-		DDCCDDCC2E0870CA00F34703 /* SpiceHarvesterQuickLook */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = DDCCDDCC2E0870CA00F34707 /* Build configuration list for PBXNativeTarget "SpiceHarvesterQuickLook" */;
-			buildPhases = (
-				DDCCDDCC2E0870CA00F34704 /* Sources */,
-				DDCCDDCC2E0870CA00F34705 /* Frameworks */,
-				DDCCDDCC2E0870CA00F34706 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				DDCCDDCC2E0870CA00F34701 /* SpiceHarvesterQuickLook */,
-			);
-			name = SpiceHarvesterQuickLook;
-			packageProductDependencies = (
-			);
-			productName = SpiceHarvesterQuickLook;
-			productReference = DDCCDDCC2E0870CA00F34702 /* SpiceHarvesterQuickLook.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 		63A1C0E32E0870CA00F34733 /* SpiceHarvesterTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 63A1C0FB2E0870CA00F34733 /* Build configuration list for PBXNativeTarget "SpiceHarvesterTests" */;
@@ -240,6 +217,28 @@
 			productName = SpiceHarvesterUITests;
 			productReference = 63A1C0EE2E0870CA00F34733 /* SpiceHarvesterUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		DDCCDDCC2E0870CA00F34703 /* SpiceHarvesterQuickLook */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DDCCDDCC2E0870CA00F34707 /* Build configuration list for PBXNativeTarget "SpiceHarvesterQuickLook" */;
+			buildPhases = (
+				DDCCDDCC2E0870CA00F34704 /* Sources */,
+				DDCCDDCC2E0870CA00F34705 /* Frameworks */,
+				DDCCDDCC2E0870CA00F34706 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				DDCCDDCC2E0870CA00F34701 /* SpiceHarvesterQuickLook */,
+			);
+			name = SpiceHarvesterQuickLook;
+			packageProductDependencies = (
+			);
+			productName = SpiceHarvesterQuickLook;
+			productReference = DDCCDDCC2E0870CA00F34702 /* SpiceHarvesterQuickLook.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 

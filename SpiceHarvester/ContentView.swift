@@ -3,14 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @State private var vm: SHDocumentViewModel
-    /// Navázaný projektový dokument (DocumentGroup). Drženo kvůli identitě okna.
-    let document: SHProjectDocument
-
-    init(document: SHProjectDocument, global: SHGlobalState) {
-        self.document = document
-        _vm = State(initialValue: SHDocumentViewModel(document: document, global: global))
-    }
+    @Bindable var vm: SHDocumentViewModel
     /// Opens auxiliary windows (`help`). Help lives in its own scene
     /// (not a `.sheet`) so it doesn't get trapped behind the active
     /// tab when the user has tabbed several SpiceHarvester windows
