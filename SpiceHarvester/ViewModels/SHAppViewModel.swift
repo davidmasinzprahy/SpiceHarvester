@@ -162,7 +162,14 @@ enum SHOpenSpiceResultOutcome {
 @Observable
 final class SHAppViewModel {
     var config: SHAppConfig
-    var servers: [SHServerConfig]
+    /// Sdílený app-level stav (server registr ad.). Drženo referencí; ve Fázi 4
+    /// se injektuje z `SpiceHarvesterApp`, zatím se vytváří v initu.
+    let global: SHGlobalState
+    /// Pass-through na `global.servers` — zachovává stávající call sites (`vm.servers`).
+    var servers: [SHServerConfig] {
+        get { global.servers }
+        set { global.servers = newValue }
+    }
     var availableModels: [String] = []
     /// `.md` files discovered in the prompt folder. Populated by `reloadPromptFiles()`.
     var availablePromptFiles: [URL] = []
@@ -196,7 +203,10 @@ final class SHAppViewModel {
     /// ID of the server for which verification last succeeded in this session. Used to
     /// style the "Ověřit server" button green only after a confirmed round-trip. Reset on
     /// server switch, edit, add, or remove.
-    var verifiedServerID: UUID?
+    var verifiedServerID: UUID? {
+        get { global.verifiedServerID }
+        set { global.verifiedServerID = newValue }
+    }
     /// Number of PDFs found in the configured input folder (recursive scan). Drives
     /// the "N PDF" chip under the input row so the user sees there is data to
     /// process before pressing Run. `nil` until first scan; refreshed on folder
@@ -284,7 +294,10 @@ final class SHAppViewModel {
     /// a verified server. Drives a red tint on the run-row status pill so
     /// the user sees that LM Studio crashed mid-session before they click
     /// Run and wait through a full HTTP timeout.
-    var isVerifiedServerReachable: Bool = true
+    var isVerifiedServerReachable: Bool {
+        get { global.isVerifiedServerReachable }
+        set { global.isVerifiedServerReachable = newValue }
+    }
 
     /// Invalidate the "verified" badge whenever the server's identity or credentials
     /// change (URL or API key edit, server switch, etc.).
@@ -766,7 +779,7 @@ final class SHAppViewModel {
     }
 
     private let configStore = SHConfigStore()
-    private let serverStore = SHServerRegistryStore()
+    private var serverStore: SHServerRegistryStore { global.serverStore }
     /// OpenAI-compatible local inference client. Recreated whenever `config.requestTimeoutSeconds`
     /// changes so the new timeout takes effect immediately (URLSessionConfiguration
     /// is captured at session creation and can't be mutated post-hoc).
@@ -827,9 +840,11 @@ final class SHAppViewModel {
     }
     private let persistenceMode: PersistenceMode
 
-    init(persistenceMode: PersistenceMode = .persistent) {
+    init(persistenceMode: PersistenceMode = .persistent, global: SHGlobalState? = nil) {
         self.persistenceMode = persistenceMode
-        self.servers = serverStore.loadServers()
+        // Fáze 4 sem injektuje sdílenou instanci z App; zatím se vytvoří lokálně.
+        // `SHGlobalState.init` načte server registr ze `serverStore`.
+        self.global = global ?? SHGlobalState()
 
         // Every launch starts with a clean slate. Only the local AI server registry
         // and a handful of non-destructive behavior preferences survive across sessions.
