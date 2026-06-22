@@ -162,8 +162,13 @@ enum SHOpenSpiceResultOutcome {
 @Observable
 final class SHDocumentViewModel {
     var config: SHAppConfig
-    /// Sdílený app-level stav (server registr ad.). Drženo referencí; ve Fázi 4
-    /// se injektuje z `SpiceHarvesterApp`, zatím se vytváří v initu.
+    /// Navázaný projektový dokument (DocumentGroup). `nil` pro headless cesty
+    /// (AppIntents). Obsah projektu (folders/modely/prompt/mode/promptHistory)
+    /// je single source of truth v `document.content`; `config` je pracovní kopie
+    /// a `persistAll` ho zapisuje zpět, takže DocumentGroup autosave/verze fungují.
+    var document: SHProjectDocument?
+    /// Sdílený app-level stav (server registr, prefs, služby). Injektuje se
+    /// z `SpiceHarvesterApp`.
     let global: SHGlobalState
     /// Pass-through na `global.servers` — zachovává stávající call sites (`vm.servers`).
     var servers: [SHServerConfig] {
@@ -1017,6 +1022,53 @@ final class SHDocumentViewModel {
         Self.liveRegistry.add(self)
     }
 
+    /// Document-based init (DocumentGroup). Využije designated init (observers,
+    /// recents, …) a překryje pracovní `config` obsahem z dokumentu.
+    convenience init(document: SHProjectDocument, global: SHGlobalState) {
+        self.init(persistenceMode: .persistent, global: global)
+        self.document = document
+        applyProjectContent(document.content)
+    }
+
+    /// Překlopí obsah projektu do pracovního `config` + `promptHistory`.
+    private func applyProjectContent(_ c: SHProjectContent) {
+        config.inputFolder = c.inputFolder
+        config.outputFolder = c.outputFolder
+        config.cacheFolder = c.cacheFolder
+        config.promptFolder = c.promptFolder
+        config.folderBookmarks = c.folderBookmarks
+        config.selectedServerID = c.selectedServerID
+        config.selectedInferenceModel = c.selectedInferenceModel
+        config.selectedEmbeddingModel = c.selectedEmbeddingModel
+        config.selectedRerankerModel = c.selectedRerankerModel
+        config.selectedOCRModel = c.selectedOCRModel
+        config.extractionMode = c.extractionMode
+        config.currentPrompt = c.currentPrompt
+        config.lastLoadedPromptName = c.lastLoadedPromptName
+        promptHistory = c.promptHistory
+    }
+
+    /// Aktuální obsah projektu z pracovního stavu (pro zápis do dokumentu →
+    /// DocumentGroup autosave / verze).
+    func currentProjectContent() -> SHProjectContent {
+        var c = SHProjectContent()
+        c.inputFolder = config.inputFolder
+        c.outputFolder = config.outputFolder
+        c.cacheFolder = config.cacheFolder
+        c.promptFolder = config.promptFolder
+        c.folderBookmarks = config.folderBookmarks
+        c.selectedServerID = config.selectedServerID
+        c.selectedInferenceModel = config.selectedInferenceModel
+        c.selectedEmbeddingModel = config.selectedEmbeddingModel
+        c.selectedRerankerModel = config.selectedRerankerModel
+        c.selectedOCRModel = config.selectedOCRModel
+        c.extractionMode = config.extractionMode
+        c.currentPrompt = config.currentPrompt
+        c.lastLoadedPromptName = config.lastLoadedPromptName
+        c.promptHistory = promptHistory
+        return c
+    }
+
     var selectedServerIndex: Int {
         get {
             guard let id = config.selectedServerID,
@@ -1169,6 +1221,8 @@ final class SHDocumentViewModel {
         serverStore.saveServers(servers)
         // App prefs jsou globální (sdílené) — ukládají se vždy.
         global.savePreferences()
+        // Obsah projektu zpět do dokumentu → DocumentGroup autosave / verze.
+        document?.content = currentProjectContent()
     }
 
     /// Debounced variant for keystroke-driven bindings (prompt text, server URL).
@@ -1185,6 +1239,7 @@ final class SHDocumentViewModel {
             self?.configStore.save(self?.config ?? SHAppConfig())
             self?.serverStore.saveServers(self?.servers ?? [])
             self?.global.savePreferences()
+            if let self, let doc = self.document { doc.content = self.currentProjectContent() }
         }
     }
 
