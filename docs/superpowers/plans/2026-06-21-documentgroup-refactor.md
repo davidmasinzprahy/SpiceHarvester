@@ -30,12 +30,14 @@ Hotové a zelené (commitnuté, CI green):
   `SHConfigStore` (stará app stejně mazala folders/modely při startu, takže obsah se
   nemigruje). Servery už jsou v global přes `serverStore`.
 
-Zbývá jako drobný úklid (nefunkční dluh, ne blocker):
-- 📋 **F5 (plné B)** — AppIntents teď běží proti zaměřenému/prvnímu document oknu
-  (`primaryViewModel` z `ContentView.onAppear`), ne přes dedikovaný headless Default
-  Project. Funguje, ale není to plná varianta B.
-- 📋 **Úklid interimu** — mrtvé metody v `SHDocumentViewModel` (`saveProjectAs`,
-  `openProject`, recents) + `recentProjectMenuTitle` v App. Funkčně neškodí.
+- ✅ **Úklid interimu** — odstraněn celý mrtvý cluster (Save/Load + project-recents
+  + snapshot/outcome typy + `handleOpenProjectOutcome` + `recentProjectMenuTitle`
+  + odpovídající testy). Zachováno: `openSpiceResultFile`, recent-folders.
+
+Zbývá jako volitelná refinement (ne blocker):
+- 📋 **F5 (plné B)** — AppIntents teď běží přes `runFromIntent` / live registry
+  (`primaryViewModel` z `ContentView.onAppear`, fallback na primary), ne přes
+  dedikovaný headless Default Project. Funguje; plná varianta B je jen refinement.
 
 **Postup:** Fázovaně se zeleným buildem po každé fázi. Fáze 1 je plně konkrétní a aditivní (nemění chování). Fáze 2–6 mají přesné deliverables + acceptance gate; jejich řádkové kroky se rozpracují při exekuci proti aktuálnímu kódu (refactor velkého VM nelze přesně předepsat dopředu, aniž by to byly skryté placeholdery).
 
