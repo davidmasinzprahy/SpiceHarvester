@@ -52,10 +52,10 @@ struct SpiceHarvesterApp: App {
 
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
+            // `focusedSceneValue` + `primaryViewModel` nastavuje samo ContentView
+            // (ve svém `.onAppear` / modifieru) — nedupluje se tady.
             ContentView(vm: vm)
-                .focusedSceneValue(\.focusedViewModel, vm)
-                .onAppear { appDelegate.primaryViewModel = vm }
         }
         .defaultSize(width: 1180, height: 980)
         .commands {
