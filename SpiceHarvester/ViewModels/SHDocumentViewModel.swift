@@ -938,6 +938,7 @@ final class SHDocumentViewModel {
         do {
             let data = try SHJSON.encoder().encode(currentProjectContent())
             try data.write(to: url, options: .atomic)
+            rememberLastProject(url)
             statusText = "Projekt uložen: \(url.lastPathComponent)"
             return url
         } catch {
@@ -981,10 +982,41 @@ final class SHDocumentViewModel {
             refreshInputFolderStats()
             scheduleConflictUpdate(after: 0)
             persistAll()
+            rememberLastProject(url)
             statusText = "Projekt načten: \(url.lastPathComponent)"
         } catch {
             statusText = "Otevření projektu selhalo: \(error.localizedDescription)"
         }
+    }
+
+    private static let lastProjectBookmarkKey = "SHLastProjectBookmark"
+
+    /// Uloží security-scoped bookmark naposledy uloženého/otevřeného projektu,
+    /// aby šel při příštím startu znovuotevřít (resolvuje se přes restart sandboxu).
+    private func rememberLastProject(_ url: URL) {
+        guard let data = try? url.bookmarkData(
+            options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil
+        ) else { return }
+        UserDefaults.standard.set(data, forKey: Self.lastProjectBookmarkKey)
+    }
+
+    /// Při startu znovuotevře naposledy použitý projekt. Volá se z `ContentView`
+    /// `.onAppear`. Pojistka: nepřepíše projekt, který už byl mezitím načten
+    /// (např. dvojklik `.spiceharvester.json` ve Finderu) — pozná to podle toho,
+    /// že pracovní `config` ještě nemá vyplněné žádné cesty/prompt.
+    func reopenLastProjectIfAvailable() {
+        guard config.inputFolder.isEmpty, config.outputFolder.isEmpty,
+              config.promptFolder.isEmpty, config.currentPrompt.isEmpty else { return }
+        guard let data = UserDefaults.standard.data(forKey: Self.lastProjectBookmarkKey) else { return }
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: data, options: .withSecurityScope,
+            relativeTo: nil, bookmarkDataIsStale: &isStale
+        ) else {
+            UserDefaults.standard.removeObject(forKey: Self.lastProjectBookmarkKey)
+            return
+        }
+        openProject(at: url)  // sám si bookmark obnoví (rememberLastProject)
     }
 
     var selectedServerIndex: Int {

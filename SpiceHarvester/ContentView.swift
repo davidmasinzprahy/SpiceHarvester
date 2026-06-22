@@ -147,11 +147,14 @@ struct ContentView: View {
         .dynamicTypeSize(.medium ... .accessibility3)
         .coordinateSpace(name: "contentRoot")
         .onAppear {
-            vm.refreshInputFolderStats()
             installTabKeyMonitor()
-            // Document-based: zaměřené/první okno slouží jako „primary" pro
-            // AppIntents (Shortcuts), které nemají referenci na document VM.
+            // Zaměřené/hlavní okno slouží jako „primary" pro AppIntents (Shortcuts),
+            // které nemají přímou referenci na view-model.
             (NSApp.delegate as? SHAppDelegate)?.primaryViewModel = vm
+            // Při startu znovuotevři naposledy použitý projekt (no-op, když už je
+            // něco načteno přes Finder). Sám si zavolá refreshInputFolderStats.
+            vm.reopenLastProjectIfAvailable()
+            vm.refreshInputFolderStats()
         }
         .onDisappear { removeTabKeyMonitor() }
         // Menu commands (Pipeline, Otevřít výstup…) cílí na zaměřený dokument.
