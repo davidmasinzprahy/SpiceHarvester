@@ -328,18 +328,12 @@ final class SHDocumentViewModel {
         let inputName = (config.inputFolder as NSString).lastPathComponent
         let promptStem = (config.lastLoadedPromptName as NSString)
             .deletingPathExtension
-        let tag: String
         if !inputName.isEmpty {
-            tag = inputName
+            return "\(base) — \(inputName)"
         } else if !promptStem.isEmpty {
-            tag = promptStem
-        } else if persistenceMode == .scratch {
-            tag = "scratch"
-        } else {
-            return base
+            return "\(base) — \(promptStem)"
         }
-        let scratchMark = persistenceMode == .scratch ? " · scratch" : ""
-        return "\(base) — \(tag)\(scratchMark)"
+        return base
     }
 
     /// Optional subtitle line shown under the window title (macOS
