@@ -248,7 +248,7 @@ struct SpiceHarvesterApp: App {
         // would mean scratch windows could silently override those
         // values, surprising the next primary-window run. By design.
         Settings {
-            SettingsView(vm: vm)
+            SettingsView(vm: vm, global: vm.global)
         }
 
         // Scratch / secondary window. Each open creates a fresh window

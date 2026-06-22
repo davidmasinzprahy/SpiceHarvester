@@ -18,10 +18,23 @@ final class SHGlobalState {
     /// Zda je ověřený server stále dosažitelný (ambient health watcher).
     var isVerifiedServerReachable: Bool = true
 
-    let serverStore: SHServerRegistryStore
+    /// App-level předvolby (Settings, Cmd+,) — sdílené přes všechny projekty
+    /// (rozhodnutí A). Persistované přes `SHPreferencesStore`.
+    var prefs: SHAppPreferences
 
-    init(serverStore: SHServerRegistryStore = SHServerRegistryStore()) {
+    let serverStore: SHServerRegistryStore
+    private let prefsStore: SHPreferencesStore
+
+    init(serverStore: SHServerRegistryStore = SHServerRegistryStore(),
+         prefsStore: SHPreferencesStore = SHPreferencesStore()) {
         self.serverStore = serverStore
+        self.prefsStore = prefsStore
         self.servers = serverStore.loadServers()
+        self.prefs = prefsStore.load()
+    }
+
+    /// Uloží aktuální předvolby. Volá se z VM persistence (persistAll/Debounced).
+    func savePreferences() {
+        prefsStore.save(prefs)
     }
 }

@@ -371,7 +371,7 @@ final class SHDocumentViewModel {
     var canLoadPrompts: Bool { hasPromptFolder }
 
     private var usesServerBackedOCR: Bool {
-        config.ocrBackend == .openAIVision || config.ocrBackend == .appleVisionThenOpenAI
+        global.prefs.ocrBackend == .openAIVision || global.prefs.ocrBackend == .appleVisionThenOpenAI
     }
 
     private var hasOCRPreprocessingRequirements: Bool {
@@ -524,16 +524,16 @@ final class SHDocumentViewModel {
     /// `lastRunAvgDocumentMs × max(pendingDocumentCount, inputFolderPdfCount)`.
     /// Returns `nil` when no history exists yet.
     var estimatedRunDurationMs: Double? {
-        guard config.lastRunAvgDocumentMs > 0 else { return nil }
+        guard global.prefs.lastRunAvgDocumentMs > 0 else { return nil }
         let count = pendingDocumentCount
         guard count > 0 else { return nil }
-        return config.lastRunAvgDocumentMs * Double(count)
+        return global.prefs.lastRunAvgDocumentMs * Double(count)
     }
 
     /// Per-document baseline (ms) from the most recent successful run. Nil when
     /// the user hasn't completed a run yet.
     var estimatedPerDocumentMs: Double? {
-        config.lastRunAvgDocumentMs > 0 ? config.lastRunAvgDocumentMs : nil
+        global.prefs.lastRunAvgDocumentMs > 0 ? global.prefs.lastRunAvgDocumentMs : nil
     }
 
     // MARK: – Parameter / prompt conflict detection
@@ -780,7 +780,7 @@ final class SHDocumentViewModel {
 
     private let configStore = SHConfigStore()
     private var serverStore: SHServerRegistryStore { global.serverStore }
-    /// OpenAI-compatible local inference client. Recreated whenever `config.requestTimeoutSeconds`
+    /// OpenAI-compatible local inference client. Recreated whenever `global.prefs.requestTimeoutSeconds`
     /// changes so the new timeout takes effect immediately (URLSessionConfiguration
     /// is captured at session creation and can't be mutated post-hoc).
     private var lmClient = SHOpenAICompatibleClient()
@@ -1113,7 +1113,7 @@ final class SHDocumentViewModel {
     }
 
     func setOCRBackend(_ backend: SHOCRBackend) {
-        config.ocrBackend = backend
+        global.prefs.ocrBackend = backend
         invalidateCachedDocumentsForPreprocessingChange()
         persistAll()
     }
@@ -1167,6 +1167,8 @@ final class SHDocumentViewModel {
             configStore.save(config)
         }
         serverStore.saveServers(servers)
+        // App prefs jsou globální (sdílené) — ukládají se vždy.
+        global.savePreferences()
     }
 
     /// Debounced variant for keystroke-driven bindings (prompt text, server URL).
@@ -1182,6 +1184,7 @@ final class SHDocumentViewModel {
             guard !Task.isCancelled else { return }
             self?.configStore.save(self?.config ?? SHAppConfig())
             self?.serverStore.saveServers(self?.servers ?? [])
+            self?.global.savePreferences()
         }
     }
 
@@ -1370,13 +1373,13 @@ final class SHDocumentViewModel {
 
             // Best-effort: LM Studio exposes per-model context length via its native
             // /api/v0/models endpoint. If we can get it, auto-populate
-            // `config.modelContextTokens` so CONSOLIDATE pre-flight uses the real
+            // `global.prefs.modelContextTokens` so CONSOLIDATE pre-flight uses the real
             // limit instead of a guess. Silent degrade for MLX and other OpenAI-
             // compatible servers that do not expose the LM Studio native endpoint.
             var contextSuffix = " · kontext ručně"
             if let loaded = try? await lmClient.fetchLoadedModels(server),
                let detected = pickLoadedModel(loaded, preferred: config.selectedInferenceModel)?.effectiveContextLength {
-                config.modelContextTokens = detected
+                global.prefs.modelContextTokens = detected
                 contextSuffix = " · kontext \(formatContextTokens(detected))"
             }
 
@@ -1454,7 +1457,7 @@ final class SHDocumentViewModel {
     /// Recreate the OpenAI-compatible client so a changed `requestTimeoutSeconds` is
     /// applied. Called on init and whenever the user moves the Timeout stepper.
     func rebuildLMClient() {
-        lmClient = SHOpenAICompatibleClient(requestTimeoutSeconds: config.requestTimeoutSeconds)
+        lmClient = SHOpenAICompatibleClient(requestTimeoutSeconds: global.prefs.requestTimeoutSeconds)
     }
 
     /// Format context like "32k" / "128k" / "1M" for compact status-bar display.
@@ -1464,7 +1467,7 @@ final class SHDocumentViewModel {
         return "\(tokens) tok."
     }
 
-    /// Best-effort refresh of `config.modelContextTokens` from LM Studio's native
+    /// Best-effort refresh of `global.prefs.modelContextTokens` from LM Studio's native
     /// `/api/v0/models` endpoint when the upcoming CONSOLIDATE batch looks like
     /// it might be close to or over the cached context. Catches the user-reloads-
     /// model-with-different-context scenario without pestering them with another
@@ -1476,13 +1479,13 @@ final class SHDocumentViewModel {
         let estimatedTokens = Int(ceil(Double(totalChars) / 3.0))
         // Trigger refresh only when we're in the same order of magnitude as the
         // current limit (avoids a network hop for every small CONSOLIDATE batch).
-        guard estimatedTokens > Int(Double(config.modelContextTokens) * 0.5) else { return }
+        guard estimatedTokens > Int(Double(global.prefs.modelContextTokens) * 0.5) else { return }
 
         guard let loaded = try? await lmClient.fetchLoadedModels(server) else { return }
         let target = pickLoadedModel(loaded, preferred: config.selectedInferenceModel)
         guard let detected = target?.effectiveContextLength else { return }
-        if detected != config.modelContextTokens {
-            config.modelContextTokens = detected
+        if detected != global.prefs.modelContextTokens {
+            global.prefs.modelContextTokens = detected
             persistAll()
             statusText = "Aktualizováno – kontext modelu \(formatContextTokens(detected))"
         }
@@ -1494,10 +1497,10 @@ final class SHDocumentViewModel {
     /// valid baseline with zeros from a no-op run).
     private func updateBaselineFromBenchmark() {
         if benchmark.avgPerDocumentMs > 0 {
-            config.lastRunAvgDocumentMs = benchmark.avgPerDocumentMs
+            global.prefs.lastRunAvgDocumentMs = benchmark.avgPerDocumentMs
         }
         if benchmark.avgPerPageMs > 0 {
-            config.lastRunAvgPageMs = benchmark.avgPerPageMs
+            global.prefs.lastRunAvgPageMs = benchmark.avgPerPageMs
         }
         persistAll()
     }
@@ -2510,24 +2513,24 @@ final class SHDocumentViewModel {
             let ocrProvider = try makeOCRProvider()
             var preprocessSignature = preprocessingSignature()
             var signatureTools: [SHTool] = []
-            if config.officeConversionEnabled { signatureTools.append(.pandoc) }
-            if config.popplerPDFTextEnabled { signatureTools.append(.pdftotext) }
-            if config.spreadsheetConversionEnabled { signatureTools.append(.in2csv) }
-            if config.ocrBackend == .ocrmypdf { signatureTools.append(contentsOf: [.ocrmypdf, .tesseract]) }
+            if global.prefs.officeConversionEnabled { signatureTools.append(.pandoc) }
+            if global.prefs.popplerPDFTextEnabled { signatureTools.append(.pdftotext) }
+            if global.prefs.spreadsheetConversionEnabled { signatureTools.append(.in2csv) }
+            if global.prefs.ocrBackend == .ocrmypdf { signatureTools.append(contentsOf: [.ocrmypdf, .tesseract]) }
             if !signatureTools.isEmpty {
                 let toolSignature = await SHToolRegistry().signatureComponent(for: signatureTools)
                 preprocessSignature += "|tools:" + toolSignature
             }
             let pipeline = SHPreprocessingPipeline(
                 converter: SHDocumentConverter(),
-                officeConversionEnabled: config.officeConversionEnabled,
-                popplerPDFTextEnabled: config.popplerPDFTextEnabled,
-                spreadsheetConversionEnabled: config.spreadsheetConversionEnabled,
+                officeConversionEnabled: global.prefs.officeConversionEnabled,
+                popplerPDFTextEnabled: global.prefs.popplerPDFTextEnabled,
+                spreadsheetConversionEnabled: global.prefs.spreadsheetConversionEnabled,
                 ocrProvider: ocrProvider,
                 cacheManager: cache,
                 logger: logger,
                 benchmark: benchmarkService,
-                maxConcurrentWorkers: config.maxConcurrentPDFWorkers,
+                maxConcurrentWorkers: global.prefs.maxConcurrentPDFWorkers,
                 preprocessingSignature: preprocessSignature
             )
 
@@ -2574,7 +2577,7 @@ final class SHDocumentViewModel {
         }
     }
 
-    /// Silently refreshes `config.modelContextTokens` from LM Studio right before
+    /// Silently refreshes `global.prefs.modelContextTokens` from LM Studio right before
     /// a CONSOLIDATE run. If the user restarted the model with a different context
     /// length in LM Studio after the last "Ověřit server", the cached value is
     /// stale and the pre-flight check would use the wrong limit. Best-effort –
@@ -2587,8 +2590,8 @@ final class SHDocumentViewModel {
         let target = loaded.first { $0.id == trimmed }
             ?? loaded.first { $0.state?.lowercased() == "loaded" }
             ?? loaded.first
-        if let detected = target?.effectiveContextLength, detected != config.modelContextTokens {
-            config.modelContextTokens = detected
+        if let detected = target?.effectiveContextLength, detected != global.prefs.modelContextTokens {
+            global.prefs.modelContextTokens = detected
             persistAll()
         }
     }
@@ -2669,12 +2672,12 @@ final class SHDocumentViewModel {
                 lmClient: lmClient,
                 logger: logger,
                 benchmark: benchmarkService,
-                maxConcurrentInference: max(1, config.maxConcurrentInference),
-                throttleDelayMs: config.throttleDelayMs,
-                modelContextTokens: config.modelContextTokens,
+                maxConcurrentInference: max(1, global.prefs.maxConcurrentInference),
+                throttleDelayMs: global.prefs.throttleDelayMs,
+                modelContextTokens: global.prefs.modelContextTokens,
                 inferenceCache: inferenceCache,
                 embeddingCache: embeddingCache,
-                bypassInferenceCache: config.bypassInferenceCache
+                bypassInferenceCache: global.prefs.bypassInferenceCache
             )
 
             let promptID = config.lastLoadedPromptName.isEmpty
@@ -2751,7 +2754,7 @@ final class SHDocumentViewModel {
     }
 
     private func makeOCRProvider() throws -> SHOCRProviding {
-        switch config.ocrBackend {
+        switch global.prefs.ocrBackend {
         case .appleVision:
             return SHVisionOCRProvider()
         case .openAIVision:
@@ -2775,15 +2778,15 @@ final class SHDocumentViewModel {
             return SHFallbackOCRProvider(primary: SHVisionOCRProvider(), fallback: fallback)
         case .ocrmypdf:
             let ocrmypdf = SHOcrmypdfProvider(
-                languages: config.ocrLanguages,
-                timeout: TimeInterval(config.ocrTimeoutSeconds)
+                languages: global.prefs.ocrLanguages,
+                timeout: TimeInterval(global.prefs.ocrTimeoutSeconds)
             )
             return SHFallbackOCRProvider(primary: ocrmypdf, fallback: SHVisionOCRProvider())
         }
     }
 
     private func preprocessingSignature() -> String {
-        switch config.ocrBackend {
+        switch global.prefs.ocrBackend {
         case .appleVision:
             return "ocr=appleVision"
         case .openAIVision:
@@ -2792,7 +2795,7 @@ final class SHDocumentViewModel {
             return "ocr=appleVisionThenOpenAI;model=\(config.selectedOCRModel)"
         case .ocrmypdf:
             // Jazyky ovlivňují OCR výstup → do signatury (timeout ne).
-            return "ocr=ocrmypdf;lang=\(SHOcrmypdfProvider.normalizedLanguages(config.ocrLanguages))"
+            return "ocr=ocrmypdf;lang=\(SHOcrmypdfProvider.normalizedLanguages(global.prefs.ocrLanguages))"
         }
     }
 

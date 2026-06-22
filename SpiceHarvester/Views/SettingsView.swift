@@ -7,6 +7,9 @@ import AppKit
 /// window de-clutters the configuration column without losing access.
 struct SettingsView: View {
     @Bindable var vm: SHDocumentViewModel
+    /// App-level předvolby (sdílené). Bindujeme přímo na `global`, ne přes
+    /// `vm.global` (to je `let` a binding přes něj kompilátor odmítá).
+    @Bindable var global: SHGlobalState
     @State private var selectedTab: SettingsTab = .performance
     /// Substring search across all tabs. Each tab declares its own
     /// keyword bag (`SettingsTab.searchKeywords`); typing here auto-selects
@@ -132,34 +135,34 @@ struct SettingsView: View {
         Form {
             Section {
                 Stepper(
-                    value: $vm.config.maxConcurrentInference,
+                    value: $global.prefs.maxConcurrentInference,
                     in: 1...16
                 ) {
                     LabeledContent("Souběžné inference požadavky") {
-                        Text("\(vm.config.maxConcurrentInference)")
+                        Text("\(global.prefs.maxConcurrentInference)")
                             .monospacedDigit()
                     }
                 }
                 .help("Kolik souběžných HTTP požadavků na AI server může pipeline držet zároveň. Nemá efekt v režimu CONSOLIDATE (vždy 1 požadavek).")
 
                 Stepper(
-                    value: $vm.config.maxConcurrentPDFWorkers,
+                    value: $global.prefs.maxConcurrentPDFWorkers,
                     in: 1...16
                 ) {
                     LabeledContent("Souběžné PDF/OCR workery") {
-                        Text("\(vm.config.maxConcurrentPDFWorkers)")
+                        Text("\(global.prefs.maxConcurrentPDFWorkers)")
                             .monospacedDigit()
                     }
                 }
                 .help("Kolik PDF se zpracovává paralelně při fázi předzpracování (parsování textu + OCR).")
 
                 Stepper(
-                    value: $vm.config.throttleDelayMs,
+                    value: $global.prefs.throttleDelayMs,
                     in: 0...2_000,
                     step: 50
                 ) {
                     LabeledContent("Throttle mezi požadavky") {
-                        Text("\(vm.config.throttleDelayMs) ms")
+                        Text("\(global.prefs.throttleDelayMs) ms")
                             .monospacedDigit()
                     }
                 }
@@ -170,24 +173,24 @@ struct SettingsView: View {
 
             Section {
                 Stepper(
-                    value: $vm.config.modelContextTokens,
+                    value: $global.prefs.modelContextTokens,
                     in: 4_096...1_048_576,
                     step: 4_096
                 ) {
                     LabeledContent("Kontext modelu") {
-                        Text("\(vm.config.modelContextTokens / 1024)k tokenů")
+                        Text("\(global.prefs.modelContextTokens / 1024)k tokenů")
                             .monospacedDigit()
                     }
                 }
                 .help("Velikost kontextového okna načteného modelu. Používá se pro pre-flight kontrolu v CONSOLIDATE režimu, aby nedošlo k HTTP 400 n_keep > n_ctx.")
 
                 Stepper(
-                    value: $vm.config.requestTimeoutSeconds,
+                    value: $global.prefs.requestTimeoutSeconds,
                     in: 60...3_600,
                     step: 60
                 ) {
                     LabeledContent("Timeout požadavku") {
-                        Text(formatTimeout(vm.config.requestTimeoutSeconds))
+                        Text(formatTimeout(global.prefs.requestTimeoutSeconds))
                             .monospacedDigit()
                     }
                 }
@@ -197,11 +200,11 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: vm.config.maxConcurrentInference) { _, _ in vm.persistAll() }
-        .onChange(of: vm.config.maxConcurrentPDFWorkers) { _, _ in vm.persistAll() }
-        .onChange(of: vm.config.throttleDelayMs) { _, _ in vm.persistAll() }
-        .onChange(of: vm.config.modelContextTokens) { _, _ in vm.persistAll() }
-        .onChange(of: vm.config.requestTimeoutSeconds) { _, _ in
+        .onChange(of: global.prefs.maxConcurrentInference) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.maxConcurrentPDFWorkers) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.throttleDelayMs) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.modelContextTokens) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.requestTimeoutSeconds) { _, _ in
             // Rebuild URLSession so the new timeout kicks in on the very next
             // request; URLSessionConfiguration is captured at session creation.
             vm.rebuildLMClient()
@@ -221,18 +224,18 @@ struct SettingsView: View {
             thirdPartyLicenseSection
         }
         .formStyle(.grouped)
-        .onChange(of: vm.config.officeConversionEnabled) { _, _ in vm.persistAll() }
-        .onChange(of: vm.config.popplerPDFTextEnabled) { _, _ in vm.persistAll() }
-        .onChange(of: vm.config.spreadsheetConversionEnabled) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.officeConversionEnabled) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.popplerPDFTextEnabled) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.spreadsheetConversionEnabled) { _, _ in vm.persistAll() }
         // Během psaní debounced persist (jako u jména serveru) — žádný write
         // storm, ale ani ztráta editace bez commitu. Při opuštění pole / Enteru
         // navíc prázdnou hodnotu normalizujeme na default, ať UI i persistence
         // odpovídají runtime fallbacku.
-        .onChange(of: vm.config.ocrLanguages) { _, _ in vm.persistAllDebounced() }
+        .onChange(of: global.prefs.ocrLanguages) { _, _ in vm.persistAllDebounced() }
         .onChange(of: ocrLanguagesFocused) { _, focused in
             if !focused { commitOCRLanguages() }
         }
-        .onChange(of: vm.config.ocrTimeoutSeconds) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.ocrTimeoutSeconds) { _, _ in vm.persistAll() }
         .task {
             // Stav nástrojů se v rámci sezení nemění; probni `--version` jen jednou,
             // ne při každém přepnutí zpět na OCR tab (5 podprocesů pokaždé).
@@ -256,7 +259,7 @@ struct SettingsView: View {
     private var ocrBackendSection: some View {
         Section {
             Picker("Backend", selection: Binding(
-                get: { vm.config.ocrBackend },
+                get: { global.prefs.ocrBackend },
                 set: { vm.setOCRBackend($0) }
             )) {
                 ForEach(SHOCRBackend.allCases) { backend in
@@ -277,7 +280,7 @@ struct SettingsView: View {
     private var ocrmypdfConfigSection: some View {
         Section {
             LabeledContent("Jazyky") {
-                TextField("ces+slk+deu+pol+eng", text: $vm.config.ocrLanguages)
+                TextField("ces+slk+deu+pol+eng", text: $global.prefs.ocrLanguages)
                     .multilineTextAlignment(.trailing)
                     .frame(maxWidth: 240)
                     .focused($ocrLanguagesFocused)
@@ -292,12 +295,12 @@ struct SettingsView: View {
                 .foregroundStyle(.orange)
             }
             Stepper(
-                value: $vm.config.ocrTimeoutSeconds,
+                value: $global.prefs.ocrTimeoutSeconds,
                 in: 60...3_600,
                 step: 60
             ) {
                 LabeledContent("Timeout") {
-                    Text(formatTimeout(vm.config.ocrTimeoutSeconds))
+                    Text(formatTimeout(global.prefs.ocrTimeoutSeconds))
                         .monospacedDigit()
                 }
             }
@@ -317,20 +320,20 @@ struct SettingsView: View {
 
     /// Kódy z pole „Jazyky", které tesseract nemá nainstalované (varování v UI).
     private var unsupportedOCRLanguages: [String] {
-        SHOcrmypdfProvider.unsupportedLanguages(in: vm.config.ocrLanguages, available: availableOCRLanguages)
+        SHOcrmypdfProvider.unsupportedLanguages(in: global.prefs.ocrLanguages, available: availableOCRLanguages)
     }
 
     /// Po dokončení editace jazyků: prázdné/whitespace → default (shodně s
     /// `SHOcrmypdfProvider`), pak persist. Volá se z onSubmit i při opuštění pole.
     private func commitOCRLanguages() {
-        let normalized = SHOcrmypdfProvider.normalizedLanguages(vm.config.ocrLanguages)
-        if vm.config.ocrLanguages != normalized { vm.config.ocrLanguages = normalized }
+        let normalized = SHOcrmypdfProvider.normalizedLanguages(global.prefs.ocrLanguages)
+        if global.prefs.ocrLanguages != normalized { global.prefs.ocrLanguages = normalized }
         vm.persistAll()
     }
 
     private var localToolsSection: some View {
         Section {
-            Toggle(isOn: $vm.config.officeConversionEnabled) {
+            Toggle(isOn: $global.prefs.officeConversionEnabled) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Konverze office dokumentů (pandoc)")
                     Text("DOCX, ODT, RTF, HTML, EPUB se převedou na text přes pandoc.")
@@ -338,7 +341,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Toggle(isOn: $vm.config.popplerPDFTextEnabled) {
+            Toggle(isOn: $global.prefs.popplerPDFTextEnabled) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Extrakce PDF textu přes pdftotext (-layout)")
                     Text("Místo PDFKit použije pdftotext; lépe zachová sloupce a tabulky.")
@@ -346,7 +349,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Toggle(isOn: $vm.config.spreadsheetConversionEnabled) {
+            Toggle(isOn: $global.prefs.spreadsheetConversionEnabled) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Konverze tabulek (XLSX/XLS) přes csvkit")
                     Text("Tabulky se převedou na CSV přes in2csv.")
@@ -390,7 +393,7 @@ struct SettingsView: View {
     private var cacheTab: some View {
         Form {
             Section {
-                Toggle(isOn: $vm.config.bypassInferenceCache) {
+                Toggle(isOn: $global.prefs.bypassInferenceCache) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Ignorovat cache LLM odpovědí")
                         Text("Pipeline nikdy nevrací uloženou odpověď a pokaždé volá server. Hodí se pro non-deterministické modely.")
@@ -416,7 +419,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: vm.config.bypassInferenceCache) { _, _ in vm.persistAll() }
+        .onChange(of: global.prefs.bypassInferenceCache) { _, _ in vm.persistAll() }
     }
 
     private static func toolStatusLabel(_ status: SHToolRegistry.Status) -> String {
