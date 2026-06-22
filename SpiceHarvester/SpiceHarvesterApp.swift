@@ -15,11 +15,11 @@ import UserNotifications
 /// the primary's. Without this routing, Open Recent in a scratch
 /// window would silently load the project into primary.
 struct FocusedViewModelKey: FocusedValueKey {
-    typealias Value = SHAppViewModel
+    typealias Value = SHDocumentViewModel
 }
 
 extension FocusedValues {
-    var focusedViewModel: SHAppViewModel? {
+    var focusedViewModel: SHDocumentViewModel? {
         get { self[FocusedViewModelKey.self] }
         set { self[FocusedViewModelKey.self] = newValue }
     }
@@ -33,7 +33,7 @@ struct SpiceHarvesterApp: App {
     /// primary window's runtime state. Secondary scratch windows (Cmd+Shift+N)
     /// have their own per-window view-model so configurations don't fight
     /// over the same UserDefaults slot.
-    @State private var vm = SHAppViewModel()
+    @State private var vm = SHDocumentViewModel()
     /// Resolves to the focused window's view-model (primary or scratch).
     /// Menu commands route through this so project ops act on the
     /// expected window. Falls back to the App-level `vm` (primary) when
@@ -48,7 +48,7 @@ struct SpiceHarvesterApp: App {
     /// View-model that menu commands should operate on — focused window
     /// when one is up, primary as fallback. Centralised so every menu
     /// item uses the same routing without scattering ternaries.
-    private var targetVM: SHAppViewModel { focusedVM ?? vm }
+    private var targetVM: SHDocumentViewModel { focusedVM ?? vm }
 
     /// Compact label for a recent-project URL shown in the
     /// `File → Otevřít nedávné…` submenu. Strips the redundant
@@ -282,13 +282,13 @@ struct SpiceHarvesterApp: App {
 /// menu item.
 ///
 /// `@State` initializer is lazy on macOS 14+/iOS 17+ — the
-/// `SHAppViewModel(persistenceMode: .scratch)` expression evaluates once
+/// `SHDocumentViewModel(persistenceMode: .scratch)` expression evaluates once
 /// per view instance, not on every body recomputation. Our deployment
 /// target is macOS 15.6 so this pattern is safe; on older OS versions
 /// SwiftUI would re-evaluate the initializer on rebuild and we'd need
-/// the `@State var vm: SHAppViewModel?` + `.onAppear` workaround.
+/// the `@State var vm: SHDocumentViewModel?` + `.onAppear` workaround.
 struct SHScratchRoot: View {
-    @State private var vm = SHAppViewModel(persistenceMode: .scratch)
+    @State private var vm = SHDocumentViewModel(persistenceMode: .scratch)
 
     var body: some View {
         ContentView(vm: vm)
@@ -348,7 +348,7 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
     /// Pointer to the primary window's view-model, set once in
     /// `applicationDidFinishLaunching` so delegate methods like
     /// `application(_:openURLs:)` can access it.
-    weak var primaryViewModel: SHAppViewModel?
+    weak var primaryViewModel: SHDocumentViewModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Become the notification delegate so we can respond to action
@@ -358,7 +358,7 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
         UNUserNotificationCenter.current().delegate = self
 
         // Register completion category + request authorization once per
-        // process. Previously this lived in SHAppViewModel.init which
+        // process. Previously this lived in SHDocumentViewModel.init which
         // re-fired for every scratch window the user opened — wasteful
         // and (with macOS' rate-limited prompt) potentially user-visible.
         registerCompletionNotificationCategory()
@@ -375,7 +375,7 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
     }
 
     /// Defines the "completion" notification category so banners posted
-    /// from `SHAppViewModel.postCompletionNotification` carry the
+    /// from `SHDocumentViewModel.postCompletionNotification` carry the
     /// "Otevřít výstup" action button. Categories must be registered
     /// before any notification using them is posted; doing this once
     /// in app launch covers every subsequent post.

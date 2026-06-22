@@ -3,7 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @Bindable var vm: SHAppViewModel
+    @Bindable var vm: SHDocumentViewModel
     /// Opens auxiliary windows (`help`). Help lives in its own scene
     /// (not a `.sheet`) so it doesn't get trapped behind the active
     /// tab when the user has tabbed several SpiceHarvester windows
@@ -1342,7 +1342,7 @@ struct ContentView: View {
                 .menuStyle(.borderlessButton)
                 .controlSize(.small)
                 .frame(maxWidth: 110)
-                .help("Naposledy spuštěné prompty (max \(SHAppViewModel.promptHistoryLimit))")
+                .help("Naposledy spuštěné prompty (max \(SHDocumentViewModel.promptHistoryLimit))")
             }
 
             if !vm.availablePromptFiles.isEmpty {

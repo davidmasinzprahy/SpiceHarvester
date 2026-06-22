@@ -68,7 +68,7 @@ enum SHFolderKind: String, Codable, Hashable, CaseIterable, Sendable {
 ///     doesn't blow away access to all my servers)
 ///   - runtime state (isRunning, logs, lastCompletion)
 ///   - performance prefs (concurrency, timeout — global tuning)
-/// JSON-encoded; written via NSSavePanel from `SHAppViewModel.saveProjectAs`.
+/// JSON-encoded; written via NSSavePanel from `SHDocumentViewModel.saveProjectAs`.
 /// Pragmatic stand-in for full DocumentGroup (see `docs/P2_BACKLOG_DEFERRED.md`).
 struct SHProjectSnapshot: Codable, Sendable {
     var inputFolder: String
@@ -136,7 +136,7 @@ enum SHProjectError: LocalizedError {
     }
 }
 
-/// Result of `SHAppViewModel.openProject`. The view layer matches on
+/// Result of `SHDocumentViewModel.openProject`. The view layer matches on
 /// these to show appropriate UI:
 ///   - `success`: silent; statusBar gets the message
 ///   - `successNeedsRepick`: alert listing folders that need re-Vybrat
@@ -160,7 +160,7 @@ enum SHOpenSpiceResultOutcome {
 
 @MainActor
 @Observable
-final class SHAppViewModel {
+final class SHDocumentViewModel {
     var config: SHAppConfig
     /// Sdílený app-level stav (server registr ad.). Drženo referencí; ve Fázi 4
     /// se injektuje z `SpiceHarvesterApp`, zatím se vytváří v initu.
@@ -178,13 +178,13 @@ final class SHAppViewModel {
     var benchmark: SHBenchmarkSnapshot = .init()
     var progressState: SHProgressViewState = .init()
     var logText: String = ""
-    var statusText: String = SHAppViewModel.idleStatus
+    var statusText: String = SHDocumentViewModel.idleStatus
     /// True while `statusText` matches the canonical idle message
     /// (`Self.idleStatus`). Decouples the status-bar-collapse logic
     /// from a hard-coded literal so localization can swap the message
     /// without re-introducing magic-string comparisons in the view.
     var isStatusIdle: Bool {
-        statusText == SHAppViewModel.idleStatus
+        statusText == SHDocumentViewModel.idleStatus
     }
     /// Single source of truth for the "nothing to report" status. Bound
     /// by Czech locale today; when full i18n lands the view-model
@@ -963,7 +963,7 @@ final class SHAppViewModel {
             // (the UN action button on completion banners) has no
             // direct vm reference, so the notification bridge stays.
             // `runAll` / `applyParameters` / `runDidComplete` moved
-            // to direct method calls via `SHAppViewModel.runFromIntent`
+            // to direct method calls via `SHDocumentViewModel.runFromIntent`
             // — removed the NotificationCenter dance that had two
             // races: (1) primary + scratch claiming the same broadcast,
             // (2) the intent observer matching the wrong vm's reply.
@@ -2289,14 +2289,14 @@ final class SHAppViewModel {
     /// entry just becomes a dangling key, but `executeRun`'s identity
     /// check (`claimant !== self`) only blocks live claimants, so
     /// stale entries are self-healing on next run attempt.
-    @MainActor private static var activeOutputClaims: [String: SHAppViewModel] = [:]
+    @MainActor private static var activeOutputClaims: [String: SHDocumentViewModel] = [:]
 
-    /// Process-wide weak registry of every live SHAppViewModel.
+    /// Process-wide weak registry of every live SHDocumentViewModel.
     /// Populated in `init`, auto-pruned on dealloc (weak refs).
     /// Consumed by `runFromIntent` so a Shortcuts.app AppIntent can
     /// target a specific window/tab by its input-folder name instead
     /// of always firing on the primary vm.
-    @MainActor static let liveRegistry: NSHashTable<SHAppViewModel> = .weakObjects()
+    @MainActor static let liveRegistry: NSHashTable<SHDocumentViewModel> = .weakObjects()
 
     /// Entry point for `RunSpiceHarvesterIntent`. Replaces the
     /// previous NotificationCenter dance (post `applyParameters`,
@@ -2388,7 +2388,7 @@ final class SHAppViewModel {
     @MainActor
     private static func resolveIntentTarget(
         targetFolder: String?
-    ) -> (vm: SHAppViewModel?, failureMessage: String?) {
+    ) -> (vm: SHDocumentViewModel?, failureMessage: String?) {
         let live = liveRegistry.allObjects
         if let target = targetFolder?.trimmingCharacters(in: .whitespacesAndNewlines),
            !target.isEmpty {

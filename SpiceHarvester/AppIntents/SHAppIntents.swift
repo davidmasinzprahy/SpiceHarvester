@@ -9,7 +9,7 @@ import AppIntents
 ///
 /// Why notifications and not direct calls?
 ///   `AppIntent.perform()` runs from a fresh actor context; the intent type
-///   has no reference to the live `SHAppViewModel`. Using NotificationCenter
+///   has no reference to the live `SHDocumentViewModel`. Using NotificationCenter
 ///   keeps the dependency one-way (intent → vm) without forcing the
 ///   view-model to expose a global singleton or hooking into SwiftUI's
 ///   environment from outside the SwiftUI graph.
@@ -85,7 +85,7 @@ struct RunSpiceHarvesterIntent: AppIntent {
         // vm by `targetFolder` (or falls back to primary), applies
         // overrides, awaits the run, restores overrides, returns
         // the summary.
-        let summary = await SHAppViewModel.runFromIntent(
+        let summary = await SHDocumentViewModel.runFromIntent(
             targetFolder: targetFolder,
             mode: mode?.rawValue,
             promptName: promptName
@@ -173,10 +173,10 @@ struct SpiceHarvesterShortcuts: AppShortcutsProvider {
 }
 
 /// Notification names used as the bridge between AppIntent.perform() (which
-/// runs without view-model access) and the running SHAppViewModel observer.
+/// runs without view-model access) and the running SHDocumentViewModel observer.
 ///
 /// **Only `openOutput` remains** — `RunSpiceHarvesterIntent` was
-/// refactored to call `SHAppViewModel.runFromIntent` directly via the
+/// refactored to call `SHDocumentViewModel.runFromIntent` directly via the
 /// process-wide vm registry, which is more robust than broadcasting
 /// (no multi-vm race on the same notification, target tab is picked
 /// by `inputFolder` name rather than the unconditional `.persistent`

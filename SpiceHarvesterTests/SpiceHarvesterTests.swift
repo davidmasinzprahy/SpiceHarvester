@@ -10,7 +10,7 @@ import Testing
 /// produces sporadic failures on busy CI.
 ///
 /// `init()` resets process-wide static state on
-/// `SHAppViewModel` (live-vm registry + active output-folder
+/// `SHDocumentViewModel` (live-vm registry + active output-folder
 /// claims) so a previous test's vm doesn't bleed into the
 /// `resolveIntentTarget` lookup or the collision check the next
 /// test exercises. Swift Testing constructs a new suite instance
@@ -19,7 +19,7 @@ import Testing
 struct SpiceHarvesterTests {
     init() async {
         await MainActor.run {
-            SHAppViewModel._resetStaticStateForTesting()
+            SHDocumentViewModel._resetStaticStateForTesting()
         }
     }
 
@@ -423,7 +423,7 @@ struct SpiceHarvesterTests {
         UserDefaults.standard.set([projectPath], forKey: recentKey)
         UserDefaults.standard.removeObject(forKey: bookmarksKey)
 
-        let vm = SHAppViewModel(persistenceMode: .scratch)
+        let vm = SHDocumentViewModel(persistenceMode: .scratch)
 
         #expect(vm.recentProjectURLs.map(\.path) == [projectPath])
     }
@@ -455,7 +455,7 @@ struct SpiceHarvesterTests {
         UserDefaults.standard.set([url.path], forKey: recentKey)
         UserDefaults.standard.removeObject(forKey: bookmarksKey)
 
-        let vm = SHAppViewModel(persistenceMode: .scratch)
+        let vm = SHDocumentViewModel(persistenceMode: .scratch)
         #expect(vm.recentProjectURLs.map(\.path) == [url.path])
 
         let outcome = vm.openProject(at: url)
@@ -475,7 +475,7 @@ struct SpiceHarvesterTests {
     /// defense against spurious pings from a half-configured vm.
     @MainActor
     @Test func recheckServerNowReturnsImmediatelyWithoutSelectedServer() async {
-        let vm = SHAppViewModel(persistenceMode: .scratch)
+        let vm = SHDocumentViewModel(persistenceMode: .scratch)
         // Clear any seed servers loaded from the registry so
         // `selectedServer` returns nil.
         vm.servers = []
@@ -503,7 +503,7 @@ struct SpiceHarvesterTests {
         UserDefaults.standard.removeObject(forKey: recentKey)
         UserDefaults.standard.removeObject(forKey: bookmarksKey)
 
-        let observer = SHAppViewModel(persistenceMode: .scratch)
+        let observer = SHDocumentViewModel(persistenceMode: .scratch)
         #expect(observer.recentProjectURLs.isEmpty)
 
         // Simulate the side effect of another vm's
@@ -513,7 +513,7 @@ struct SpiceHarvesterTests {
         let peerPath = "/tmp/sh-peer-\(UUID().uuidString).spiceharvester.json"
         UserDefaults.standard.set([peerPath], forKey: recentKey)
         NotificationCenter.default.post(
-            name: SHAppViewModel.recentProjectsDidChange,
+            name: SHDocumentViewModel.recentProjectsDidChange,
             object: nil
         )
 

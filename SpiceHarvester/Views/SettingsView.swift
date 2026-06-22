@@ -6,7 +6,7 @@ import AppKit
 /// OCR backend, and inference-cache bypass. Keeping these out of the main
 /// window de-clutters the configuration column without losing access.
 struct SettingsView: View {
-    @Bindable var vm: SHAppViewModel
+    @Bindable var vm: SHDocumentViewModel
     @State private var selectedTab: SettingsTab = .performance
     /// Substring search across all tabs. Each tab declares its own
     /// keyword bag (`SettingsTab.searchKeywords`); typing here auto-selects
