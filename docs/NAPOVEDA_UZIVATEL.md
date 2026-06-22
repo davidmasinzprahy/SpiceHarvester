@@ -18,11 +18,15 @@ Rozdělovač mezi sloupci lze tahat. Mezi Prompt / Průběh / Log jsou tažiteln
 
 Pokročilá nastavení (souběžnost, throttle, kontext modelu, timeout, OCR backend, cache) jsou v **Předvolbách** (`Cmd+,`) — fulltextové vyhledávání nahoře.
 
-## Multi-window
+## Projekty a okna (document-based)
 
-- **Cmd+Shift+N** otevře *scratch* okno s vlastní prázdnou konfigurací
-- Scratch okno **nepersistuje** do UserDefaults (server registry sdílen, ostatní per-session)
-- Pro persistování: **Uložit projekt jako…** (Cmd+Shift+S) → `.spiceharvester.json`
+Aplikace je **document-based** — každé okno je jeden projekt (`*.spiceharvester.json`):
+
+- **Cmd+N** — nový projekt (nové okno)
+- **Cmd+O** — otevřít projekt; **File → Open Recent** — nedávné projekty (nativní)
+- **Cmd+S** — uložit; macOS navíc automaticky ukládá (autosave) a drží verze
+- Dvojklik / přetažení `*.spiceharvester.json` ve Finderu otevře projekt
+- Více oken = více projektů zároveň; server registr a předvolby (Cmd+,) jsou sdílené napříč všemi
 
 ### Identifikace záložky v titulku okna
 
@@ -63,12 +67,12 @@ Cleanup je automatický — když první běh skončí (success/cancel/fail), dr
 | Režim **SEARCH** | **Cmd+2** |
 | Režim **CONSOLIDATE** | **Cmd+3** |
 
-### Soubory a okna
+### Soubory a okna (document-based)
 | Akce | Zkratka |
 |---|---|
-| Otevřít projekt… | **Cmd+O** |
-| Uložit projekt jako… | **Cmd+Shift+S** |
-| Nové okno (scratch) | **Cmd+Shift+N** |
+| Nový projekt | **Cmd+N** |
+| Otevřít projekt | **Cmd+O** |
+| Uložit | **Cmd+S** |
 | Otevřít výstup ve Finderu | **Cmd+Shift+O** |
 | Otevřít výsledek… | **Cmd+Shift+R** |
 
@@ -90,24 +94,20 @@ Cleanup je automatický — když první běh skončí (success/cancel/fail), dr
 
 ## Menu bar layout
 
-Aplikace přidává custom top-level menu **Pipeline** mezi standardní macOS menu — pipeline akce (Spustit, Přerušit, Předzpracování, Extrakce, Režim, Znovu ověřit server) jsou tam sjednocené. **File** menu drží jen project/document operace.
+Aplikace je document-based — **File** menu má nativní New / Open / Open Recent / Save / Save As / Duplicate / Rename (dodává DocumentGroup). Custom top-level menu **Pipeline** sjednocuje pipeline akce.
 
-### File
-- **Nové okno (scratch)** — Cmd+Shift+N
-- **Otevřít projekt…** — Cmd+O
-- **Otevřít nedávné** › last 8 projektů + Vyčistit seznam
-- **Uložit projekt jako…** — Cmd+Shift+S
-- **Otevřít výsledek…** — Cmd+Shift+R (načte `.spice-result.json` exportovaný přes Export → JSON; pipeline tlačítka jsou během zobrazení výsledku disabled)
+### File *(nativní DocumentGroup)*
+- **Nový projekt** — Cmd+N, **Otevřít** — Cmd+O, **Open Recent**, **Uložit** — Cmd+S, Save As / Duplicate / Rename
+- **Otevřít výsledek…** — Cmd+Shift+R (načte `.spice-result.json`; pipeline tlačítka jsou během zobrazení výsledku disabled)
 - **Otevřít výstup ve Finderu** — Cmd+Shift+O
 
 ### Pipeline *(custom)*
 - **Spustit** / **Přerušit** — Cmd+R / Cmd+.
 - **Předzpracování** — Cmd+Shift+P
 - **Extrakce** — Cmd+Shift+E
+- **Vyčistit cache** — smaže cache aktivního projektu (per-okno)
 - **Režim FAST / SEARCH / CONSOLIDATE** — Cmd+1 / Cmd+2 / Cmd+3
-- **Znovu ověřit zdraví serveru** — manuální ping mimo 30 s health watcher (užitečné hned po restartu LM Studia: kliknutí dá okamžitou červenou/zelenou indikaci místo čekání až 30 s na další scheduled ping)
-
-### Otevřít nedávné
+- **Znovu ověřit zdraví serveru** — manuální ping mimo 30 s health watcher
 
 Po každém **Uložit projekt jako…** nebo **Otevřít projekt…** se cesta zaznamenává do persistentního seznamu (max 8). V submenu se zobrazují jako `název · cesta` (s tildeify, např. `medical · ~/Documents/projects`). Kliknutí přímo načte projekt — bez panel dialogu. Když cesta selže (soubor smazán), automaticky se ze seznamu odebere.
 

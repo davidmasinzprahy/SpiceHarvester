@@ -13,7 +13,7 @@ implementace, scope a očekávaný čas. Slouží jako vstup pro budoucí ticket
 | Save / Load Project commands (interim za DocumentGroup) | ✅ Hotovo |
 | Multi-window (scratch WindowGroup, Cmd+Shift+N) | ✅ Hotovo + per-tab title/server + collision detection + Help window scene |
 | Quick Look provider (extension target) | ✅ Hotovo — `SpiceHarvesterQuickLook` app-extension target, data-based `QLPreviewProvider`, embed do appky |
-| Otevření projektu z Finderu (DocumentGroup gap) | ✅ Hotovo variantou B — `.spiceharvester.json` UTI + `application(_:open:)` routing; plný `DocumentGroup` refactor záměrně nerealizován (viz #2) |
+| Plný DocumentGroup refactor | ✅ Hotovo — `SHGlobalState` + `SHProjectDocument` (ReferenceFileDocument) + `SHDocumentViewModel`; scéna `DocumentGroup`, nativní New/Open/Recent/Save, app prefs globální, prefs migrace z legacy |
 | API key migrace na Keychain | ✅ Hotovo — `SHKeychain` + `SHServerRegistryStore`, `apiKey` mimo Codable, jednorázová migrace plaintextu |
 
 ## 1. Quick Look provider pro výstupní JSON
@@ -79,12 +79,20 @@ incrementálně bez Xcode IDE.
 
 ## 2. Multi-window support přes DocumentGroup
 
-> ✅ **VYŘEŠENO variantou B** — plný `DocumentGroup` refactor se **nerealizoval**
-> (vysoké riziko na 3108řádkovém `SHAppViewModel`, většina přínosu už pokryta
-> interimem). Jediná reálná mezera — otevření projektu z Finderu — je zavřená
-> registrací UTI `DavidMasin.SpiceHarvester.project` + routingem v
-> `application(_:open:)`. Viz [spec](superpowers/specs/2026-06-21-finder-open-projektu-design.md).
-> Sekce níže je historický záznam plné varianty.
+> ✅ **HOTOVO (plná varianta)** — `SHAppViewModel` rozdělen na `SHGlobalState`
+> (servery, prefs, recents, služby) + `SHDocumentViewModel` (per-okno runtime)
+> + `SHProjectDocument` (ReferenceFileDocument). Scéna je `DocumentGroup` →
+> nativní New/Open/Open Recent/Save/autosave/verze. App prefs jsou globální
+> (Settings), prefs se jednorázově zmigrují z legacy configu. Viz
+> [spec](superpowers/specs/2026-06-21-documentgroup-refactor-design.md) +
+> [plán](superpowers/plans/2026-06-21-documentgroup-refactor.md).
+> Sekce níže je historický návrh.
+>
+> **Drobnost k dořešení:** AppIntents (Shortcuts) běží proti zaměřenému/prvnímu
+> document oknu (`primaryViewModel` nastaví `ContentView.onAppear`), ne přes
+> dedikovaný headless „Default Project". Dále zůstávají v `SHDocumentViewModel`
+> mrtvé interim metody (`saveProjectAs`/`openProject`/recents) — funkčně nevadí,
+> kandidát na úklid.
 
 ### Co a proč
 Aktuálně `WindowGroup` = single window. Pro power-usera s 3 různými

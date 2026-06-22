@@ -22,18 +22,20 @@ Hotové a zelené (commitnuté, CI green):
   `convenience init(document:global:)`, `applyProjectContent`/`currentProjectContent`,
   `persistAll` write-back do dokumentu. Zatím **nezapojeno** do scény.
 
-Zbývá (vyžaduje samostatnou fokusovanou session — je to nedělitelný „big-bang"):
-- 📋 **F4b-ii (zbytek)** — přepnout scénu `WindowGroup`→`DocumentGroup`, `ContentView(document:global:)`
-  konstruuje VM, odstranit scratch `WindowGroup` + custom file/recents commands.
-- 📋 **F5** — Settings plně odpojit od `vm` (per-dokumentové akce ven); AppIntents headless přes Default Project.
-- 📋 **F6** — migrace při startu (legacy → Default Project) + úklid interimu + docs.
+- ✅ **F4b-ii** — scéna `WindowGroup`→`DocumentGroup`; `ContentView(document:global:)`
+  konstruuje VM; Settings odpojeno od `vm` (binduje `global`); `Vyčistit cache`
+  přesunuto do Pipeline menu; scratch `WindowGroup` + custom file/recents commands
+  odstraněny; `application(_:open:)` řeší jen `.spice-result.json`.
+- ✅ **F6 (migrace prefs)** — `SHGlobalState` jednorázově zmigruje app prefs z legacy
+  `SHConfigStore` (stará app stejně mazala folders/modely při startu, takže obsah se
+  nemigruje). Servery už jsou v global přes `serverStore`.
 
-**Zjištěná kaskáda (proč je zbytek big-bang):** app-level Settings dnes hostuje
-**per-dokumentové** akce — `Vyčistit cache` (`vm.clearCache()` nad cache složkou
-projektu) a `setOCRBackend` (vedlejší efekty na VM). Ty se musí přesunout do hlavního
-okna (ContentView), jinak Settings nejde odpojit od document-VM. Plus scéna nejde
-půlit (build je rozbitý, dokud není celý přechod hotový). Proto se F4b-ii(zbytek)+F5+F6
-musí udělat společně v jednom kuse.
+Zbývá jako drobný úklid (nefunkční dluh, ne blocker):
+- 📋 **F5 (plné B)** — AppIntents teď běží proti zaměřenému/prvnímu document oknu
+  (`primaryViewModel` z `ContentView.onAppear`), ne přes dedikovaný headless Default
+  Project. Funguje, ale není to plná varianta B.
+- 📋 **Úklid interimu** — mrtvé metody v `SHDocumentViewModel` (`saveProjectAs`,
+  `openProject`, recents) + `recentProjectMenuTitle` v App. Funkčně neškodí.
 
 **Postup:** Fázovaně se zeleným buildem po každé fázi. Fáze 1 je plně konkrétní a aditivní (nemění chování). Fáze 2–6 mají přesné deliverables + acceptance gate; jejich řádkové kroky se rozpracují při exekuci proti aktuálnímu kódu (refactor velkého VM nelze přesně předepsat dopředu, aniž by to byly skryté placeholdery).
 

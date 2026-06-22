@@ -303,14 +303,14 @@ XLSX rozhraní `SHXLSXExporting` (`SHXLSXExportPlaceholder`) — nerealizováno;
 
 ## 13. UI a ViewModel
 
-### `SpiceHarvesterApp` (App scene) — multi-scene struktura
+### `SpiceHarvesterApp` (App scene) — document-based struktura
 
-Aplikace registruje **4 Scene**:
-- `WindowGroup(id: "main")` — primary okno s `vm = SHAppViewModel()` (`.persistent` mode, default). `.focusedSceneValue(\.focusedViewModel, vm)` propaguje view-model pro Cmd+? routing.
-- `Settings { SettingsView(vm:) }` — nativní Cmd+, sheet, sdílí primary's `vm` (Settings je vždy globální per-app).
-- `WindowGroup(id: "scratch", for: UUID.self) { _ in SHScratchRoot() }` — scratch okna otevíraná `openWindow(id: "scratch", value: UUID())` z menu Cmd+Shift+N. Každé má vlastní view-model (`.scratch` mode), vlastní `.focusedSceneValue(\.focusedViewModel, vm)`.
-- `Window("Nápověda Spice Harvester", id: "help")` — samostatné okno nápovědy (singleton), otevírané `openWindow(id: "help")`.
-- `defaultSize(width: 1180, height: 980)` na obou WindowGroup.
+Aplikace je **document-based** (`DocumentGroup`). Registruje Scene:
+- `DocumentGroup(newDocument: { SHProjectDocument() }) { config in ContentView(document: config.document, global: global) }` — každé okno = jeden projekt (`*.spiceharvester.json`). Nativní New/Open/Open Recent/Save/Save As/Duplicate/Rename + autosave/verze. `ContentView` z dokumentu + sdíleného `global` zkonstruuje `SHDocumentViewModel`; `.focusedSceneValue(\.focusedViewModel, vm)` propaguje per-okno VM pro menu commands.
+- `Settings { SettingsView(global:) }` — nativní Cmd+, sheet, binduje **app-level** `SHGlobalState.prefs` (žádný document VM). Per-projekt akce (`Vyčistit cache`) jsou v Pipeline menu.
+- `Window("Nápověda Spice Harvester", id: "help")` — samostatné okno nápovědy (singleton).
+
+App-level stav drží `@State private var global = SHGlobalState()` v `SpiceHarvesterApp` a injektuje se do každého document okna i do Settings. `SHGlobalState` vlastní server registr (+ health), recents, **app prefs** (`SHAppPreferences` přes `SHPreferencesStore`, jednorázová migrace z legacy `SHConfigStore`) a sdílené služby.
 
 `SHAppDelegate` (`NSApplicationDelegateAdaptor`):
 - `applicationDidFinishLaunching`: nastaví `UNUserNotificationCenter.delegate = self`, registruje completion notification category s "Otevřít výstup" akcí, volá `requestAuthorization`. Frame autosave přes `setFrameAutosaveName("SpiceHarvesterMainWindow")` — manuální resize/move se persistuje, první launch padne na `resizeMainWindowForCurrentScreen()` (visibleFrame logika).

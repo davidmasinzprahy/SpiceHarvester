@@ -30,7 +30,15 @@ final class SHGlobalState {
         self.serverStore = serverStore
         self.prefsStore = prefsStore
         self.servers = serverStore.loadServers()
-        self.prefs = prefsStore.load()
+        // Jednorázová migrace prefs z legacy `SHConfigStore` (před DocumentGroup
+        // žily app prefs v `SHAppConfig`). Stará app stejně mazala folders/modely
+        // při startu, takže obsah dokumentu se nemigruje — jen prefs.
+        if prefsStore.hasSaved {
+            self.prefs = prefsStore.load()
+        } else {
+            self.prefs = SHMigration.split(SHConfigStore().load()).prefs
+            prefsStore.save(self.prefs)
+        }
     }
 
     /// Uloží aktuální předvolby. Volá se z VM persistence (persistAll/Debounced).

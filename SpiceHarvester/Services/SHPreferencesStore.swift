@@ -10,6 +10,10 @@ final class SHPreferencesStore {
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
+    /// Zda už byly prefs někdy uloženy (rozlišuje „čerstvá instalace / před migrací"
+    /// od „uložené defaulty"). Pro jednorázový seed z legacy configu.
+    var hasSaved: Bool { defaults.data(forKey: Keys.prefs) != nil }
+
     func load() -> SHAppPreferences {
         guard let data = defaults.data(forKey: Keys.prefs) else { return SHAppPreferences() }
         do { return try SHJSON.decoder().decode(SHAppPreferences.self, from: data) }
