@@ -202,12 +202,38 @@ final class SHAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCe
     /// `application(_:openURLs:)` can access it.
     weak var primaryViewModel: SHDocumentViewModel?
 
-    /// Document-based app při startu bez dokumentu jinak ukáže Open panel
-    /// (výběr souboru). Vrácením `true` se místo toho otevře nové prázdné
-    /// projektové okno — uživatel přistane rovnou v aplikaci (jako u dřívějšího
-    /// single-window chování). Platí i pro klik na ikonu v Docku bez oken.
+    /// Document-based app by při startu bez dokumentu ukázala Open panel.
+    /// `true` → místo panelu otevřeme dokument (viz `applicationOpenUntitledFile`).
+    /// Platí i pro klik na ikonu v Docku bez oken.
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    /// Místo prázdného „Untitled" okna otevře **pojmenovaný** výchozí projekt
+    /// (`Spice Harvester.spiceharvester.json` v Application Support kontejneru
+    /// appky — vždy zapisovatelný i v sandboxu). Okno tak má smysluplný titulek,
+    /// ne „Untitled", a nezobrazí se Open panel. Soubor se při prvním startu
+    /// vytvoří z prázdného obsahu.
+    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        let url = Self.defaultProjectURL
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let empty = (try? SHJSON.encoder().encode(SHProjectContent())) ?? Data()
+            try? empty.write(to: url, options: .atomic)
+        }
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, _ in }
+        return true
+    }
+
+    /// Pojmenovaný výchozí projekt v Application Support kontejneru appky.
+    /// Název souboru = titulek okna („Spice Harvester").
+    static var defaultProjectURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return base
+            .appendingPathComponent("SpiceHarvester", isDirectory: true)
+            .appendingPathComponent("Spice Harvester.spiceharvester.json")
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
